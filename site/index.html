@@ -3,143 +3,193 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Regulation Search</title>
+    <title>Поиск по регламентам</title>
     <meta
       name="description"
-      content="Поиск по корпоративным регламентам с цитатами по разделам и таблицам."
+      content="Поиск по корпоративным регламентам с ответом, источником и историей запросов."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Sora:wght@500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260315a" />
   </head>
   <body>
-    <div class="page-shell">
-      <header class="hero">
-        <div class="hero__copy">
-          <p class="eyebrow">Hybrid Regulation Search</p>
-          <h1>Быстрый поиск по регламентам, разделам и табличным блокам</h1>
-          <p class="hero__lead">
-            Фронт для поиска по `docx`-регламентам через `n8n` и `Qdrant`. Сервис
-            показывает найденные фрагменты, цитаты и документы-источники.
-          </p>
-          <div class="hero__chips">
-            <span>7 регламентов</span>
-            <span>dense + sparse</span>
-            <span>цитаты по разделам</span>
-          </div>
-        </div>
-        <aside class="hero__panel">
-          <h2>Подключение</h2>
-          <label class="field">
-            <span>Webhook URL</span>
-            <input
-              id="endpoint"
-              type="url"
-              spellcheck="false"
-              value="https://plequeneluera.beget.app/webhook/regulations-search"
-              placeholder="https://.../webhook/regulations-search"
-            />
-          </label>
-          <div class="hero__panel-actions">
-            <button id="save-endpoint" class="button button--ghost" type="button">
-              Сохранить URL
-            </button>
-            <button id="test-endpoint" class="button button--secondary" type="button">
-              Проверить
-            </button>
-          </div>
-          <p class="helper">
-            Если workflow ещё не активирован, временно используйте `webhook-test`.
-          </p>
-          <p id="endpoint-status" class="status status--muted">URL не проверялся</p>
-        </aside>
+    <div class="app-shell">
+      <header class="mode-switch" aria-label="Режимы">
+        <button class="mode-switch__item mode-switch__item--active" type="button">
+          Поиск по регламентам
+        </button>
+        <button class="mode-switch__item" type="button" disabled>
+          Загрузка документов
+        </button>
       </header>
 
-      <main class="layout">
-        <section class="search-card">
-          <div class="section-heading">
-            <div>
-              <p class="section-label">Запрос</p>
-              <h2>Найти нужный регламент</h2>
-            </div>
-            <div class="limit-control">
-              <label class="field field--compact">
-                <span>Лимит</span>
-                <input id="limit" type="number" min="1" max="12" step="1" value="6" />
-              </label>
-            </div>
-          </div>
+      <main class="page">
+        <section class="search-panel">
+          <h1>Поиск по регламентам</h1>
+          <p class="search-panel__lead">
+            Задайте вопрос — получите ответ с указанием источника
+          </p>
 
           <form id="search-form" class="search-form">
-            <label class="field field--large">
-              <span>Что ищем</span>
-              <textarea
+            <div class="search-bar">
+              <input
                 id="query"
-                rows="4"
-                placeholder="Например: кто согласует командировку и какие документы нужны для отчета?"
-              ></textarea>
-            </label>
+                class="search-bar__input"
+                type="text"
+                maxlength="500"
+                placeholder="Например: кто не должен согласовывать требования к результатам проекта?"
+                autocomplete="off"
+              />
+              <button id="submit" class="search-bar__button" type="submit">Найти</button>
+            </div>
 
-            <div class="search-form__actions">
-              <button id="submit" class="button button--primary" type="submit">
-                Найти по регламентам
-              </button>
-              <button id="fill-example" class="button button--ghost" type="button">
-                Подставить пример
-              </button>
+            <div class="search-meta">
+              <div class="search-meta__left">
+                <label class="meta-control">
+                  <span>Лимит</span>
+                  <input id="limit" type="number" min="1" max="12" step="1" value="6" />
+                </label>
+              </div>
+              <div id="char-count" class="search-meta__right">0 / 500</div>
             </div>
           </form>
 
           <div class="examples">
-            <button class="example-pill" type="button" data-query="кто согласует командировку и какие документы нужны для отчета">
-              Командировки и отчет
+            <span class="examples__label">Частые вопросы:</span>
+            <button
+              class="example-pill"
+              type="button"
+              data-query="порядок согласования договоров"
+            >
+              Порядок согласования договоров
             </button>
-            <button class="example-pill" type="button" data-query="какие заявки в CRM будут отклонены">
-              Отклонение заявок в CRM
+            <button
+              class="example-pill"
+              type="button"
+              data-query="правила оформления командировки"
+            >
+              Правила оформления командировки
             </button>
-            <button class="example-pill" type="button" data-query="что важно учитывать по субподрядчикам на коммерческих проектах">
-              Субподрядчики и ограничения
+            <button
+              class="example-pill"
+              type="button"
+              data-query="кто не должен согласовывать требования к результатам проекта"
+            >
+              Кто не должен согласовывать требования
+            </button>
+            <button
+              class="example-pill"
+              type="button"
+              data-query="какие заявки в crm будут отклонены"
+            >
+              Какие заявки в CRM отклоняют
             </button>
           </div>
         </section>
 
-        <section class="results-card">
-          <div class="section-heading">
-            <div>
-              <p class="section-label">Результат</p>
-              <h2>Найденные фрагменты</h2>
-            </div>
-            <p id="summary" class="summary">Введите запрос и запустите поиск.</p>
-          </div>
+        <section class="answer-card">
+          <h2>Ответ</h2>
 
           <div id="state" class="state state--idle">
-            Здесь появятся найденные куски регламентов с указанием документа и раздела.
+            Введите вопрос по регламентам и нажмите «Найти».
           </div>
 
-          <div id="results" class="results" hidden></div>
+          <div id="answer-content" class="answer-content" hidden>
+            <p class="answer-line">
+              <strong>Ответ:</strong>
+              <span id="answer-text"></span>
+            </p>
+
+            <p class="answer-line">
+              <strong>Источник:</strong>
+              <span id="answer-source"></span>
+            </p>
+
+            <div class="answer-divider"></div>
+
+            <div class="feedback-row">
+              <span>Ответ был полезен?</span>
+              <div class="feedback-row__actions">
+                <button id="feedback-yes" class="feedback-button" type="button">Да</button>
+                <button id="feedback-no" class="feedback-button" type="button">Нет</button>
+              </div>
+            </div>
+          </div>
         </section>
+
+        <section class="sources-card">
+          <div class="section-title">
+            <h2>Найденные фрагменты</h2>
+            <p id="summary">После поиска здесь появятся подтверждающие фрагменты.</p>
+          </div>
+
+          <div id="results" class="results-list">
+            <div class="results-placeholder">
+              Пока пусто. После поиска здесь появятся цитаты из документов и разделов.
+            </div>
+          </div>
+        </section>
+
+        <section class="history-card">
+          <h2>Последние запросы</h2>
+          <div id="history-list" class="history-list">
+            <div class="history-placeholder">История запросов появится после первых поисков.</div>
+          </div>
+        </section>
+
+        <details class="settings-card">
+          <summary>Настройки подключения</summary>
+
+          <div class="settings-grid">
+            <label class="field">
+              <span>Webhook URL</span>
+              <input
+                id="endpoint"
+                type="url"
+                spellcheck="false"
+                value="https://plequeneluera.beget.app/webhook/regulations-search"
+                placeholder="https://.../webhook/regulations-search"
+              />
+            </label>
+
+            <div class="settings-actions">
+              <button id="save-endpoint" class="secondary-button" type="button">
+                Сохранить URL
+              </button>
+              <button id="test-endpoint" class="secondary-button" type="button">
+                Проверить webhook
+              </button>
+            </div>
+          </div>
+
+          <p class="settings-help">
+            Если production webhook ещё не активирован, временно укажите `webhook-test`.
+          </p>
+          <p id="endpoint-status" class="endpoint-status">URL не проверялся</p>
+        </details>
       </main>
     </div>
 
     <template id="result-template">
-      <article class="result-card">
-        <div class="result-card__top">
-          <div>
-            <p class="result-card__rank"></p>
-            <h3 class="result-card__title"></h3>
-          </div>
-          <span class="result-card__score"></span>
+      <article class="result-item">
+        <div class="result-item__head">
+          <span class="result-item__rank"></span>
+          <span class="result-item__score"></span>
         </div>
-        <p class="result-card__citation"></p>
-        <div class="result-card__meta"></div>
-        <p class="result-card__text"></p>
+        <h3 class="result-item__title"></h3>
+        <p class="result-item__citation"></p>
+        <p class="result-item__text"></p>
       </article>
     </template>
 
-    <script src="./app.js"></script>
+    <template id="history-template">
+      <button class="history-item" type="button"></button>
+    </template>
+
+    <script src="./app.js?v=20260315a"></script>
   </body>
 </html>

@@ -1,5 +1,7 @@
 const storageKey = "regulation-search-endpoint";
+const historyKey = "regulation-search-history";
 const defaultEndpoint = "https://plequeneluera.beget.app/webhook/regulations-search";
+const maxHistoryItems = 8;
 
 const endpointInput = document.querySelector("#endpoint");
 const saveEndpointButton = document.querySelector("#save-endpoint");
@@ -9,12 +11,19 @@ const searchForm = document.querySelector("#search-form");
 const queryInput = document.querySelector("#query");
 const limitInput = document.querySelector("#limit");
 const submitButton = document.querySelector("#submit");
-const fillExampleButton = document.querySelector("#fill-example");
+const charCount = document.querySelector("#char-count");
 const stateNode = document.querySelector("#state");
-const summaryNode = document.querySelector("#summary");
+const answerContent = document.querySelector("#answer-content");
+const answerText = document.querySelector("#answer-text");
+const answerSource = document.querySelector("#answer-source");
 const resultsNode = document.querySelector("#results");
+const summaryNode = document.querySelector("#summary");
+const historyList = document.querySelector("#history-list");
 const resultTemplate = document.querySelector("#result-template");
+const historyTemplate = document.querySelector("#history-template");
 const exampleButtons = document.querySelectorAll(".example-pill");
+const feedbackYes = document.querySelector("#feedback-yes");
+const feedbackNo = document.querySelector("#feedback-no");
 
 function loadEndpoint() {
   const saved = localStorage.getItem(storageKey);
@@ -25,84 +34,113 @@ function saveEndpoint() {
   const value = endpointInput.value.trim();
   if (!value) {
     setEndpointStatus("Сначала укажите webhook URL.", "error");
-    return;
+    return false;
   }
 
   localStorage.setItem(storageKey, value);
   setEndpointStatus("URL сохранён локально в браузере.", "ok");
+  return true;
 }
 
-function setEndpointStatus(text, kind = "muted") {
+function setEndpointStatus(text, kind = "") {
   endpointStatus.textContent = text;
-  endpointStatus.className = `status status--${kind}`;
+  endpointStatus.className = "endpoint-status";
+  if (kind) {
+    endpointStatus.classList.add(`endpoint-status--${kind}`);
+  }
 }
 
 function setState(text, kind = "idle") {
   stateNode.hidden = false;
-  resultsNode.hidden = true;
+  answerContent.hidden = true;
   stateNode.textContent = text;
   stateNode.className = `state state--${kind}`;
 }
 
-function clearState() {
+function showAnswer() {
   stateNode.hidden = true;
-  resultsNode.hidden = false;
+  answerContent.hidden = false;
 }
 
-function formatScore(value) {
-  if (typeof value !== "number" || Number.isNaN(value)) {
-    return "score n/a";
-  }
-  return `score ${value.toFixed(3)}`;
+function updateCharCount() {
+  charCount.textContent = `${queryInput.value.length} / 500`;
 }
 
-function formatMeta(hit) {
-  const parts = [];
-  if (hit.source_file) {
-    parts.push(`Файл: ${hit.source_file}`);
+function setFeedback(active) {
+  feedbackYes.classList.toggle("feedback-button--active", active === "yes");
+  feedbackNo.classList.toggle("feedback-button--active", active === "no");
+}
+
+function getHistory() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(historyKey) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
   }
-  if (hit.block_type) {
-    parts.push(`Блок: ${hit.block_type}`);
+}
+
+function saveHistoryQuery(query) {
+  const current = getHistory().filter((item) => item !== query);
+  current.unshift(query);
+  localStorage.setItem(historyKey, JSON.stringify(current.slice(0, maxHistoryItems)));
+}
+
+function renderHistory() {
+  const items = getHistory();
+  historyList.innerHTML = "";
+
+  if (items.length === 0) {
+    historyList.innerHTML =
+      '<div class="history-placeholder">История запросов появится после первых поисков.</div>';
+    return;
   }
-  if (Array.isArray(hit.section_path) && hit.section_path.length > 0) {
-    parts.push(`Раздел: ${hit.section_path.join(" > ")}`);
+
+  for (const query of items) {
+    const fragment = historyTemplate.content.cloneNode(true);
+    const button = fragment.querySelector(".history-item");
+    button.textContent = query;
+    button.addEventListener("click", () => {
+      queryInput.value = query;
+      updateCharCount();
+      queryInput.focus();
+    });
+    historyList.append(fragment);
   }
-  return parts;
 }
 
 function renderResults(data) {
   resultsNode.innerHTML = "";
+  setFeedback("");
 
   if (!Array.isArray(data.hits) || data.hits.length === 0) {
-    setState("Совпадения не найдены. Попробуйте упростить формулировку или изменить лимит.", "idle");
-    summaryNode.textContent = "Поиск выполнен, но ничего не найдено.";
+    setState("Совпадения не найдены. Попробуйте переформулировать вопрос.", "idle");
+    summaryNode.textContent = "Поиск выполнен, но релевантные фрагменты не найдены.";
+    resultsNode.innerHTML =
+      '<div class="results-placeholder">Ничего не найдено. Попробуйте упростить формулировку запроса.</div>';
     return;
   }
+
+  const topHit = data.hits[0];
+  answerText.textContent = topHit.raw_text || topHit.text || "Текст ответа отсутствует.";
+  answerSource.textContent = topHit.citation || topHit.doc_title || "Источник не указан.";
+  showAnswer();
 
   summaryNode.textContent = `Найдено ${data.count} фрагментов по запросу «${data.query}».`;
 
   for (const hit of data.hits) {
     const fragment = resultTemplate.content.cloneNode(true);
-    fragment.querySelector(".result-card__rank").textContent = `Результат ${hit.rank}`;
-    fragment.querySelector(".result-card__title").textContent =
+    fragment.querySelector(".result-item__rank").textContent = `Результат ${hit.rank}`;
+    fragment.querySelector(".result-item__score").textContent =
+      typeof hit.score === "number" ? hit.score.toFixed(3) : "n/a";
+    fragment.querySelector(".result-item__title").textContent =
       hit.doc_title || "Документ без названия";
-    fragment.querySelector(".result-card__score").textContent = formatScore(hit.score);
-    fragment.querySelector(".result-card__citation").textContent =
+    fragment.querySelector(".result-item__citation").textContent =
       hit.citation || "Цитата не указана";
-    fragment.querySelector(".result-card__text").textContent =
+    fragment.querySelector(".result-item__text").textContent =
       hit.raw_text || hit.text || "Текст фрагмента отсутствует";
-
-    const metaNode = fragment.querySelector(".result-card__meta");
-    for (const item of formatMeta(hit)) {
-      const chip = document.createElement("span");
-      chip.textContent = item;
-      metaNode.append(chip);
-    }
-
     resultsNode.append(fragment);
   }
-
-  clearState();
 }
 
 async function callSearchApi({ endpoint, query, limit }) {
@@ -123,16 +161,16 @@ async function callSearchApi({ endpoint, query, limit }) {
 
   try {
     payload = text ? JSON.parse(text) : {};
-  } catch (error) {
+  } catch {
     throw new Error(`Сервис вернул не-JSON ответ: ${text.slice(0, 220)}`);
   }
 
   if (!response.ok) {
-    const message =
+    throw new Error(
       payload?.message ||
-      payload?.error ||
-      `HTTP ${response.status}: ${response.statusText || "ошибка webhook"}`;
-    throw new Error(message);
+        payload?.error ||
+        `HTTP ${response.status}: ${response.statusText || "ошибка webhook"}`
+    );
   }
 
   return payload;
@@ -146,26 +184,31 @@ async function handleSearch(event) {
   const limit = Number(limitInput.value || 6);
 
   if (!endpoint) {
-    setState("Сначала укажите webhook URL.", "error");
+    setState("Сначала укажите webhook URL в настройках подключения.", "error");
     return;
   }
 
   if (!query) {
-    setState("Введите поисковый запрос по регламентам.", "error");
+    setState("Введите вопрос по регламентам.", "error");
     return;
   }
 
-  saveEndpoint();
+  if (!saveEndpoint()) {
+    return;
+  }
+
   submitButton.disabled = true;
-  setState("Ищу релевантные куски регламентов, включая таблицы и важные блоки...", "loading");
-  summaryNode.textContent = "Запрос выполняется...";
+  setState("Выполняю поиск по регламентам и собираю подтверждающие фрагменты...", "loading");
+  summaryNode.textContent = "Идёт поиск по документам.";
 
   try {
     const payload = await callSearchApi({ endpoint, query, limit });
+    saveHistoryQuery(query);
+    renderHistory();
     renderResults(payload);
   } catch (error) {
     setState(`Поиск не выполнен: ${error.message}`, "error");
-    summaryNode.textContent = "Есть проблема с webhook или сетевым доступом.";
+    summaryNode.textContent = "Не удалось получить ответ от backend.";
   } finally {
     submitButton.disabled = false;
   }
@@ -179,15 +222,14 @@ async function testEndpoint() {
   }
 
   testEndpointButton.disabled = true;
-  setEndpointStatus("Проверяю webhook тестовым запросом...", "muted");
+  setEndpointStatus("Проверяю webhook тестовым запросом...", "");
 
   try {
     const payload = await callSearchApi({
       endpoint,
-      query: "какие документы нужны для отчета по командировке",
+      query: "правила оформления командировки",
       limit: 2
     });
-
     const count = Array.isArray(payload.hits) ? payload.hits.length : 0;
     setEndpointStatus(`Webhook отвечает. Получено результатов: ${count}.`, "ok");
   } catch (error) {
@@ -197,21 +239,21 @@ async function testEndpoint() {
   }
 }
 
-function fillExample() {
-  queryInput.value = "кто согласует командировку и какие документы нужны для отчета";
-  queryInput.focus();
-}
-
 loadEndpoint();
+renderHistory();
+updateCharCount();
 
 searchForm.addEventListener("submit", handleSearch);
 saveEndpointButton.addEventListener("click", saveEndpoint);
 testEndpointButton.addEventListener("click", testEndpoint);
-fillExampleButton.addEventListener("click", fillExample);
+queryInput.addEventListener("input", updateCharCount);
+feedbackYes.addEventListener("click", () => setFeedback("yes"));
+feedbackNo.addEventListener("click", () => setFeedback("no"));
 
 for (const button of exampleButtons) {
   button.addEventListener("click", () => {
     queryInput.value = button.dataset.query || "";
+    updateCharCount();
     queryInput.focus();
   });
 }
