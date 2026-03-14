@@ -6,7 +6,7 @@
     <title>Поиск по регламентам</title>
     <meta
       name="description"
-      content="Поиск по корпоративным регламентам с ответом, источником и историей запросов."
+      content="Поиск по корпоративным регламентам с ответом, источником и загрузкой документов."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -14,130 +14,179 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260315a" />
+    <link rel="stylesheet" href="./styles.css?v=20260315b" />
   </head>
   <body>
     <div class="app-shell">
       <header class="mode-switch" aria-label="Режимы">
-        <button class="mode-switch__item mode-switch__item--active" type="button">
+        <button
+          class="mode-switch__item mode-switch__item--active"
+          type="button"
+          data-view="search"
+        >
           Поиск по регламентам
         </button>
-        <button class="mode-switch__item" type="button" disabled>
+        <button class="mode-switch__item" type="button" data-view="upload">
           Загрузка документов
         </button>
       </header>
 
       <main class="page">
-        <section class="search-panel">
-          <h1>Поиск по регламентам</h1>
-          <p class="search-panel__lead">
-            Задайте вопрос — получите ответ с указанием источника
-          </p>
+        <div id="search-view" class="view-panel">
+          <section class="search-panel">
+            <h1>Поиск по регламентам</h1>
+            <p class="search-panel__lead">
+              Задайте вопрос — получите ответ с указанием источника
+            </p>
 
-          <form id="search-form" class="search-form">
-            <div class="search-bar">
+            <form id="search-form" class="search-form">
+              <div class="search-bar">
+                <input
+                  id="query"
+                  class="search-bar__input"
+                  type="text"
+                  maxlength="500"
+                  placeholder="Например: кто не должен согласовывать требования к результатам проекта?"
+                  autocomplete="off"
+                />
+                <button id="submit" class="search-bar__button" type="submit">Найти</button>
+              </div>
+
+              <div class="search-meta">
+                <div class="search-meta__left">
+                  <label class="meta-control">
+                    <span>Лимит</span>
+                    <input id="limit" type="number" min="1" max="12" step="1" value="6" />
+                  </label>
+                </div>
+                <div id="char-count" class="search-meta__right">0 / 500</div>
+              </div>
+            </form>
+
+            <div class="examples">
+              <span class="examples__label">Частые вопросы:</span>
+              <button
+                class="example-pill"
+                type="button"
+                data-query="порядок согласования договоров"
+              >
+                Порядок согласования договоров
+              </button>
+              <button
+                class="example-pill"
+                type="button"
+                data-query="правила оформления командировки"
+              >
+                Правила оформления командировки
+              </button>
+              <button
+                class="example-pill"
+                type="button"
+                data-query="кто не должен согласовывать требования к результатам проекта"
+              >
+                Кто не должен согласовывать требования
+              </button>
+              <button
+                class="example-pill"
+                type="button"
+                data-query="какие заявки в crm будут отклонены"
+              >
+                Какие заявки в CRM отклоняют
+              </button>
+            </div>
+          </section>
+
+          <section class="answer-card">
+            <h2>Ответ</h2>
+
+            <div id="state" class="state state--idle">
+              Введите вопрос по регламентам и нажмите «Найти».
+            </div>
+
+            <div id="answer-content" class="answer-content" hidden>
+              <p class="answer-line">
+                <strong>Ответ:</strong>
+                <span id="answer-text"></span>
+              </p>
+
+              <p class="answer-line">
+                <strong>Источник:</strong>
+                <span id="answer-source"></span>
+              </p>
+
+              <div class="answer-divider"></div>
+
+              <div class="feedback-row">
+                <span>Ответ был полезен?</span>
+                <div class="feedback-row__actions">
+                  <button id="feedback-yes" class="feedback-button" type="button">Да</button>
+                  <button id="feedback-no" class="feedback-button" type="button">Нет</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="sources-card">
+            <div class="section-title">
+              <h2>Найденные фрагменты</h2>
+              <p id="summary">После поиска здесь появятся подтверждающие фрагменты.</p>
+            </div>
+
+            <div id="results" class="results-list">
+              <div class="results-placeholder">
+                Пока пусто. После поиска здесь появятся цитаты из документов и разделов.
+              </div>
+            </div>
+          </section>
+
+          <section class="history-card">
+            <h2>Последние запросы</h2>
+            <div id="history-list" class="history-list">
+              <div class="history-placeholder">История запросов появится после первых поисков.</div>
+            </div>
+          </section>
+        </div>
+
+        <section id="upload-view" class="upload-view" hidden>
+          <div class="upload-view__inner">
+            <h1>Загрузка документов</h1>
+            <p class="upload-view__lead">
+              Загрузите регламенты для индексации в базу знаний
+            </p>
+
+            <div
+              id="dropzone"
+              class="dropzone"
+              tabindex="0"
+              role="button"
+              aria-label="Загрузка документов"
+            >
               <input
-                id="query"
-                class="search-bar__input"
-                type="text"
-                maxlength="500"
-                placeholder="Например: кто не должен согласовывать требования к результатам проекта?"
-                autocomplete="off"
+                id="file-input"
+                type="file"
+                accept=".pdf,.docx,.txt,application/pdf,text/plain"
+                multiple
+                hidden
               />
-              <button id="submit" class="search-bar__button" type="submit">Найти</button>
+
+              <div class="dropzone__icon" aria-hidden="true">📁</div>
+              <p class="dropzone__title">Перетащите файлы сюда или нажмите для выбора</p>
+              <p class="dropzone__hint">PDF, DOCX, TXT — до 20 МБ каждый</p>
             </div>
 
-            <div class="search-meta">
-              <div class="search-meta__left">
-                <label class="meta-control">
-                  <span>Лимит</span>
-                  <input id="limit" type="number" min="1" max="12" step="1" value="6" />
-                </label>
-              </div>
-              <div id="char-count" class="search-meta__right">0 / 500</div>
-            </div>
-          </form>
-
-          <div class="examples">
-            <span class="examples__label">Частые вопросы:</span>
-            <button
-              class="example-pill"
-              type="button"
-              data-query="порядок согласования договоров"
-            >
-              Порядок согласования договоров
-            </button>
-            <button
-              class="example-pill"
-              type="button"
-              data-query="правила оформления командировки"
-            >
-              Правила оформления командировки
-            </button>
-            <button
-              class="example-pill"
-              type="button"
-              data-query="кто не должен согласовывать требования к результатам проекта"
-            >
-              Кто не должен согласовывать требования
-            </button>
-            <button
-              class="example-pill"
-              type="button"
-              data-query="какие заявки в crm будут отклонены"
-            >
-              Какие заявки в CRM отклоняют
-            </button>
-          </div>
-        </section>
-
-        <section class="answer-card">
-          <h2>Ответ</h2>
-
-          <div id="state" class="state state--idle">
-            Введите вопрос по регламентам и нажмите «Найти».
-          </div>
-
-          <div id="answer-content" class="answer-content" hidden>
-            <p class="answer-line">
-              <strong>Ответ:</strong>
-              <span id="answer-text"></span>
+            <p id="upload-status" class="upload-status">
+              Интерфейс загрузки готов. После выбора покажу список файлов для индексации.
             </p>
 
-            <p class="answer-line">
-              <strong>Источник:</strong>
-              <span id="answer-source"></span>
-            </p>
-
-            <div class="answer-divider"></div>
-
-            <div class="feedback-row">
-              <span>Ответ был полезен?</span>
-              <div class="feedback-row__actions">
-                <button id="feedback-yes" class="feedback-button" type="button">Да</button>
-                <button id="feedback-no" class="feedback-button" type="button">Нет</button>
+            <section id="selected-files-card" class="selected-files-card" hidden>
+              <div class="selected-files-card__head">
+                <h2>Выбранные файлы</h2>
+                <button id="clear-files" class="secondary-button" type="button">
+                  Очистить список
+                </button>
               </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="sources-card">
-          <div class="section-title">
-            <h2>Найденные фрагменты</h2>
-            <p id="summary">После поиска здесь появятся подтверждающие фрагменты.</p>
-          </div>
-
-          <div id="results" class="results-list">
-            <div class="results-placeholder">
-              Пока пусто. После поиска здесь появятся цитаты из документов и разделов.
-            </div>
-          </div>
-        </section>
-
-        <section class="history-card">
-          <h2>Последние запросы</h2>
-          <div id="history-list" class="history-list">
-            <div class="history-placeholder">История запросов появится после первых поисков.</div>
+              <div id="file-list" class="file-list"></div>
+            </section>
           </div>
         </section>
 
@@ -190,6 +239,15 @@
       <button class="history-item" type="button"></button>
     </template>
 
-    <script src="./app.js?v=20260315a"></script>
+    <template id="file-template">
+      <article class="file-item">
+        <div class="file-item__meta">
+          <h3 class="file-item__name"></h3>
+          <p class="file-item__details"></p>
+        </div>
+      </article>
+    </template>
+
+    <script src="./app.js?v=20260315b"></script>
   </body>
 </html>
