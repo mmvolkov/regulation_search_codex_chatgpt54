@@ -1,0 +1,209 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "regulations-search",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -860,
+        160
+      ],
+      "id": "1b95a577-9cb8-4458-a302-42b2b278f001",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body && typeof $json.body === 'object' ? $json.body : $json;\nconst query = String(body.query || '').trim();\nif (!query) {\n  throw new Error('Missing query');\n}\nconst parsedLimit = Number(body.limit || 8);\nconst limit = Number.isFinite(parsedLimit) ? Math.max(1, Math.min(12, Math.round(parsedLimit))) : 8;\nconst searchMode = String(body.mode || 'search').trim().toLowerCase();\nreturn [{ json: { query, limit, mode: searchMode === 'answer' ? 'answer' : 'search' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        160
+      ],
+      "id": "f4ca8f08-b756-4452-bb55-3025dcb9f002",
+      "name": "Normalize Request"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.OPENAI_API_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { model: $env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-large', input: $json.query } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -400,
+        160
+      ],
+      "id": "62f7d7cc-47db-41e4-9f7d-9ea98386d003",
+      "name": "Create Dense Embedding"
+    },
+    {
+      "parameters": {
+        "jsCode": "const request = $items('Normalize Request', 0, 0).json;\nconst vector = $json.data?.[0]?.embedding;\nif (!Array.isArray(vector)) {\n  throw new Error('Embedding vector missing in OpenAI response');\n}\nconst prefetchLimit = Math.max(request.limit * 4, 20);\nconst qdrantBody = {\n  prefetch: [\n    {\n      using: $env.QDRANT_DENSE_VECTOR_NAME || 'dense',\n      query: vector,\n      limit: prefetchLimit\n    },\n    {\n      using: $env.QDRANT_SPARSE_VECTOR_NAME || 'bm25',\n      query: {\n        text: request.query,\n        model: 'Qdrant/bm25'\n      },\n      limit: prefetchLimit\n    }\n  ],\n  query: { fusion: 'rrf' },\n  limit: request.limit,\n  with_payload: true,\n  with_vector: false\n};\nreturn [{ json: { ...request, qdrantBody } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        160
+      ],
+      "id": "202ad647-af2e-4f5f-83a0-f51615ef4004",
+      "name": "Build Hybrid Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.QDRANT_URL || 'http://localhost:6333').replace(/\\/$/, '') + '/collections/' + ($env.QDRANT_COLLECTION || 'regulations_hybrid') + '/points/query' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "api-key",
+              "value": "={{$env.QDRANT_API_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json.qdrantBody}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        80,
+        160
+      ],
+      "id": "46924819-43c9-484c-8d2f-d26f749d5005",
+      "name": "Query Qdrant"
+    },
+    {
+      "parameters": {
+        "jsCode": "const request = $items('Build Hybrid Query', 0, 0).json;\nconst points = $json.result?.points || [];\nconst hits = points.map((point, index) => {\n  const payload = point.payload || {};\n  const sectionPath = Array.isArray(payload.section_path) ? payload.section_path : [];\n  return {\n    rank: index + 1,\n    score: point.score,\n    doc_title: payload.doc_title || null,\n    source_file: payload.source_file || null,\n    block_type: payload.block_type || null,\n    citation: payload.citation || [payload.doc_title, sectionPath.join(' > ')].filter(Boolean).join(' / '),\n    section_path: sectionPath,\n    raw_text: payload.raw_text || null,\n    text: payload.text || null\n  };\n});\nreturn [{ json: { query: request.query, limit: request.limit, mode: request.mode, count: hits.length, hits } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        160
+      ],
+      "id": "d56b77e1-26cf-47fc-8f2d-c08fb04f6006",
+      "name": "Format Search Result"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        560,
+        160
+      ],
+      "id": "323ab4d2-9d4c-4d89-b7b8-2db6f7c37007",
+      "name": "Respond"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Request": {
+      "main": [
+        [
+          {
+            "node": "Create Dense Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Dense Embedding": {
+      "main": [
+        [
+          {
+            "node": "Build Hybrid Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Hybrid Query": {
+      "main": [
+        [
+          {
+            "node": "Query Qdrant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Qdrant": {
+      "main": [
+        [
+          {
+            "node": "Format Search Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Search Result": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
+
