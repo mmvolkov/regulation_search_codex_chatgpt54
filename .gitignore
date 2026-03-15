@@ -27,3 +27,4 @@ venv/
 # Local project artifacts
 data/
 qdrant_storage/
+documents/
