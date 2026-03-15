@@ -1,17 +1,25 @@
 const storageKey = "regulation-search-endpoint";
+const emailKey = "regulation-search-email";
 const historyKey = "regulation-search-history";
-const defaultEndpoint = "https://plequeneluera.beget.app/webhook/regulations-search";
+const defaultEndpoint = "./regulation-proxy/search.php";
+const authEndpoint = "./regulation-proxy/auth.php";
+const uploadEndpoint = "./regulation-proxy/upload.php";
+const collectionEndpoint = "./regulation-proxy/collection.php";
 const maxHistoryItems = 8;
 const maxFileSize = 20 * 1024 * 1024;
-const allowedExtensions = [".pdf", ".docx", ".txt"];
+const allowedExtensions = [".docx"];
 
 const modeButtons = document.querySelectorAll(".mode-switch__item");
 const searchView = document.querySelector("#search-view");
 const uploadView = document.querySelector("#upload-view");
 
 const endpointInput = document.querySelector("#endpoint");
+const emailInput = document.querySelector("#user-email");
+const saveEmailButton = document.querySelector("#save-email");
+const checkAccessButton = document.querySelector("#check-access");
 const saveEndpointButton = document.querySelector("#save-endpoint");
 const testEndpointButton = document.querySelector("#test-endpoint");
+const accessStatus = document.querySelector("#access-status");
 const endpointStatus = document.querySelector("#endpoint-status");
 
 const searchForm = document.querySelector("#search-form");
@@ -40,6 +48,13 @@ const selectedFilesCard = document.querySelector("#selected-files-card");
 const fileList = document.querySelector("#file-list");
 const fileTemplate = document.querySelector("#file-template");
 const clearFilesButton = document.querySelector("#clear-files");
+const startIndexingButton = document.querySelector("#start-indexing");
+const refreshCollectionButton = document.querySelector("#refresh-collection");
+const clearCollectionButton = document.querySelector("#clear-collection");
+const collectionPoints = document.querySelector("#collection-points");
+const collectionStatus = document.querySelector("#collection-status");
+const collectionName = document.querySelector("#collection-name");
+const collectionNote = document.querySelector("#collection-note");
 
 let selectedFiles = [];
 
@@ -48,16 +63,46 @@ function loadEndpoint() {
   endpointInput.value = saved || defaultEndpoint;
 }
 
+function loadUserEmail() {
+  emailInput.value = localStorage.getItem(emailKey) || "";
+  if (emailInput.value.trim()) {
+    setAccessStatus("E-mail сохранён локально. Доступ ещё не проверен.", "");
+  }
+}
+
+function getUserEmail() {
+  return emailInput.value.trim().toLowerCase();
+}
+
+function saveUserEmail() {
+  const value = getUserEmail();
+  if (!value) {
+    setAccessStatus("Сначала укажите рабочий e-mail.", "error");
+    return false;
+  }
+  localStorage.setItem(emailKey, value);
+  setAccessStatus("E-mail сохранён локально в браузере.", "ok");
+  return true;
+}
+
 function saveEndpoint() {
   const value = endpointInput.value.trim();
   if (!value) {
-    setEndpointStatus("Сначала укажите webhook URL.", "error");
+    setEndpointStatus("Сначала укажите URL search proxy.", "error");
     return false;
   }
 
   localStorage.setItem(storageKey, value);
   setEndpointStatus("URL сохранён локально в браузере.", "ok");
   return true;
+}
+
+function setAccessStatus(text, kind = "") {
+  accessStatus.textContent = text;
+  accessStatus.className = "endpoint-status";
+  if (kind) {
+    accessStatus.classList.add(`endpoint-status--${kind}`);
+  }
 }
 
 function setEndpointStatus(text, kind = "") {
@@ -68,6 +113,14 @@ function setEndpointStatus(text, kind = "") {
   }
 }
 
+function setCollectionNote(text, kind = "") {
+  collectionNote.textContent = text;
+  collectionNote.className = "collection-note";
+  if (kind) {
+    collectionNote.classList.add(`collection-note--${kind}`);
+  }
+}
+
 function setActiveView(view) {
   const isSearch = view === "search";
   searchView.hidden = !isSearch;
@@ -75,6 +128,10 @@ function setActiveView(view) {
 
   for (const button of modeButtons) {
     button.classList.toggle("mode-switch__item--active", button.dataset.view === view);
+  }
+
+  if (view === "upload") {
+    refreshCollectionStatus();
   }
 }
 
@@ -88,6 +145,13 @@ function setState(text, kind = "idle") {
 function showAnswer() {
   stateNode.hidden = true;
   answerContent.hidden = false;
+}
+
+function normalizeAnswerText(text) {
+  if (!text) {
+    return "Текст ответа отсутствует.";
+  }
+  return String(text).replace(/^\s*ответ:\s*/i, "").trim() || "Текст ответа отсутствует.";
 }
 
 function updateCharCount() {
@@ -142,7 +206,13 @@ function renderResults(data) {
   resultsNode.innerHTML = "";
   setFeedback("");
 
-  if (!Array.isArray(data.hits) || data.hits.length === 0) {
+  const fragments = Array.isArray(data.fragments)
+    ? data.fragments
+    : Array.isArray(data.hits)
+      ? data.hits
+      : [];
+
+  if (fragments.length === 0) {
     setState("Совпадения не найдены. Попробуйте переформулировать вопрос.", "idle");
     summaryNode.textContent = "Поиск выполнен, но релевантные фрагменты не найдены.";
     resultsNode.innerHTML =
@@ -150,22 +220,33 @@ function renderResults(data) {
     return;
   }
 
-  const topHit = data.hits[0];
-  answerText.textContent = topHit.raw_text || topHit.text || "Текст ответа отсутствует.";
-  answerSource.textContent = topHit.citation || topHit.doc_title || "Источник не указан.";
+  const topHit = fragments[0];
+  const topTitle = topHit.doc_title || topHit.doc_name || "Источник не указан";
+  const topCitation = topHit.citation || topHit.heading || topHit.fragment_type || "";
+  answerText.textContent = normalizeAnswerText(
+    data.answer ||
+      topHit.raw_text ||
+      topHit.text
+  );
+  answerSource.textContent = [topTitle, topCitation].filter(Boolean).join(" / ");
   showAnswer();
 
-  summaryNode.textContent = `Найдено ${data.count} фрагментов по запросу «${data.query}».`;
+  const total = typeof data.total_fragments === "number" ? data.total_fragments : fragments.length;
+  summaryNode.textContent = `Найдено ${total} фрагментов по запросу «${data.query}».`;
 
-  for (const hit of data.hits) {
+  for (const [index, hit] of fragments.entries()) {
     const fragment = resultTemplate.content.cloneNode(true);
-    fragment.querySelector(".result-item__rank").textContent = `Результат ${hit.rank}`;
+    fragment.querySelector(".result-item__rank").textContent = `Результат ${hit.rank || index + 1}`;
     fragment.querySelector(".result-item__score").textContent =
-      typeof hit.score === "number" ? hit.score.toFixed(3) : "n/a";
+      typeof hit.score === "number"
+        ? hit.score.toFixed(3)
+        : typeof hit.rrf_score === "number"
+          ? hit.rrf_score.toFixed(3)
+          : "n/a";
     fragment.querySelector(".result-item__title").textContent =
-      hit.doc_title || "Документ без названия";
+      hit.doc_title || hit.doc_name || "Документ без названия";
     fragment.querySelector(".result-item__citation").textContent =
-      hit.citation || "Цитата не указана";
+      hit.citation || hit.heading || hit.fragment_type || "Цитата не указана";
     fragment.querySelector(".result-item__text").textContent =
       hit.raw_text || hit.text || "Текст фрагмента отсутствует";
     resultsNode.append(fragment);
@@ -173,15 +254,17 @@ function renderResults(data) {
 }
 
 async function callSearchApi({ endpoint, query, limit }) {
+  const email = getUserEmail();
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
+      email,
       query,
-      limit,
-      mode: "search"
+      top_k: limit,
+      generate_answer: true
     })
   });
 
@@ -198,7 +281,135 @@ async function callSearchApi({ endpoint, query, limit }) {
     throw new Error(
       payload?.message ||
         payload?.error ||
-        `HTTP ${response.status}: ${response.statusText || "ошибка webhook"}`
+        `HTTP ${response.status}: ${response.statusText || "ошибка API"}`
+    );
+  }
+
+  return payload;
+}
+
+async function checkAccess() {
+  const email = getUserEmail();
+  if (!email) {
+    setAccessStatus("Сначала укажите рабочий e-mail.", "error");
+    return null;
+  }
+
+  const response = await fetch(authEndpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ email })
+  });
+
+  const text = await response.text();
+  let payload;
+
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`Auth API вернул не-JSON ответ: ${text.slice(0, 220)}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      payload?.message ||
+        payload?.error ||
+        `HTTP ${response.status}: ${response.statusText || "ошибка авторизации"}`
+    );
+  }
+
+  return payload;
+}
+
+async function uploadSingleFile(file) {
+  const email = getUserEmail();
+  const formData = new FormData();
+  formData.append("file", file, file.name);
+  formData.append("preset", "balanced");
+  formData.append("email", email);
+
+  const response = await fetch(uploadEndpoint, {
+    method: "POST",
+    body: formData
+  });
+
+  const text = await response.text();
+  let payload;
+
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`Сервис загрузки вернул не-JSON ответ: ${text.slice(0, 220)}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      payload?.detail ||
+        payload?.message ||
+        payload?.error ||
+        `HTTP ${response.status}: ${response.statusText || "ошибка загрузки"}`
+    );
+  }
+
+  return payload;
+}
+
+async function fetchCollectionStatus() {
+  const email = getUserEmail();
+  const response = await fetch(collectionEndpoint, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      "X-User-Email": email
+    }
+  });
+
+  const text = await response.text();
+  let payload;
+
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`Collection API вернул не-JSON ответ: ${text.slice(0, 220)}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      payload?.message ||
+        payload?.error ||
+        `HTTP ${response.status}: ${response.statusText || "ошибка collection API"}`
+    );
+  }
+
+  return payload;
+}
+
+async function clearCollection() {
+  const email = getUserEmail();
+  const response = await fetch(collectionEndpoint, {
+    method: "DELETE",
+    headers: {
+      Accept: "application/json",
+      "X-User-Email": email
+    }
+  });
+
+  const text = await response.text();
+  let payload;
+
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`Collection API вернул не-JSON ответ: ${text.slice(0, 220)}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      payload?.message ||
+        payload?.error ||
+        `HTTP ${response.status}: ${response.statusText || "ошибка очистки"}`
     );
   }
 
@@ -209,11 +420,17 @@ async function handleSearch(event) {
   event.preventDefault();
 
   const endpoint = endpointInput.value.trim();
+  const email = getUserEmail();
   const query = queryInput.value.trim();
   const limit = Number(limitInput.value || 6);
 
   if (!endpoint) {
-    setState("Сначала укажите webhook URL в настройках подключения.", "error");
+    setState("Сначала укажите URL search proxy в настройках подключения.", "error");
+    return;
+  }
+
+  if (!email) {
+    setState("Сначала укажите рабочий e-mail и проверьте доступ.", "error");
     return;
   }
 
@@ -250,6 +467,11 @@ async function testEndpoint() {
     return;
   }
 
+  if (!getUserEmail()) {
+    setEndpointStatus("Сначала укажите рабочий e-mail.", "error");
+    return;
+  }
+
   testEndpointButton.disabled = true;
   setEndpointStatus("Проверяю webhook тестовым запросом...", "");
 
@@ -259,12 +481,77 @@ async function testEndpoint() {
       query: "правила оформления командировки",
       limit: 2
     });
-    const count = Array.isArray(payload.hits) ? payload.hits.length : 0;
-    setEndpointStatus(`Webhook отвечает. Получено результатов: ${count}.`, "ok");
+    const count = Array.isArray(payload.fragments)
+      ? payload.fragments.length
+      : Array.isArray(payload.hits)
+        ? payload.hits.length
+        : 0;
+    setEndpointStatus(`API отвечает. Получено результатов: ${count}.`, "ok");
   } catch (error) {
-    setEndpointStatus(`Не удалось достучаться до webhook: ${error.message}`, "error");
+    setEndpointStatus(`Не удалось достучаться до API: ${error.message}`, "error");
   } finally {
     testEndpointButton.disabled = false;
+  }
+}
+
+async function refreshCollectionStatus() {
+  if (!getUserEmail()) {
+    collectionPoints.textContent = "-";
+    collectionStatus.textContent = "Ожидает доступ";
+    collectionName.textContent = "-";
+    setCollectionNote("Сначала укажите рабочий e-mail и проверьте доступ.", "");
+    return;
+  }
+
+  refreshCollectionButton.disabled = true;
+  clearCollectionButton.disabled = true;
+  setCollectionNote("Обновляю состояние коллекции...", "");
+
+  try {
+    const payload = await fetchCollectionStatus();
+    collectionPoints.textContent =
+      typeof payload.points_count === "number" ? String(payload.points_count) : "0";
+    collectionStatus.textContent = payload.status || "unknown";
+    collectionName.textContent = payload.name || "-";
+    setCollectionNote("Статус коллекции обновлён.", "ok");
+  } catch (error) {
+    collectionPoints.textContent = "-";
+    collectionStatus.textContent = "Ошибка";
+    collectionName.textContent = "-";
+    setCollectionNote(`Не удалось обновить коллекцию: ${error.message}`, "error");
+  } finally {
+    refreshCollectionButton.disabled = false;
+    clearCollectionButton.disabled = false;
+  }
+}
+
+async function handleClearCollection() {
+  if (!getUserEmail()) {
+    setCollectionNote("Сначала укажите рабочий e-mail и проверьте доступ.", "error");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    "Очистить всю коллекцию? Все загруженные фрагменты будут удалены."
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  clearCollectionButton.disabled = true;
+  refreshCollectionButton.disabled = true;
+  setCollectionNote("Очищаю коллекцию...", "");
+
+  try {
+    await clearCollection();
+    await refreshCollectionStatus();
+    setCollectionNote("Коллекция очищена.", "ok");
+  } catch (error) {
+    setCollectionNote(`Не удалось очистить коллекцию: ${error.message}`, "error");
+  } finally {
+    clearCollectionButton.disabled = false;
+    refreshCollectionButton.disabled = false;
   }
 }
 
@@ -280,10 +567,12 @@ function renderSelectedFiles() {
 
   if (selectedFiles.length === 0) {
     selectedFilesCard.hidden = true;
+    startIndexingButton.disabled = true;
     return;
   }
 
   selectedFilesCard.hidden = false;
+  startIndexingButton.disabled = false;
 
   for (const file of selectedFiles) {
     const fragment = fileTemplate.content.cloneNode(true);
@@ -349,12 +638,76 @@ function openFilePicker() {
   fileInput.click();
 }
 
+async function startIndexing() {
+  if (!getUserEmail()) {
+    setUploadStatus("Сначала укажите рабочий e-mail и проверьте доступ.", "error");
+    return;
+  }
+
+  if (selectedFiles.length === 0) {
+    setUploadStatus("Сначала выберите хотя бы один DOCX-файл.", "error");
+    return;
+  }
+
+  startIndexingButton.disabled = true;
+  clearFilesButton.disabled = true;
+  dropzone.setAttribute("aria-disabled", "true");
+
+  const results = [];
+
+  try {
+    for (const [index, file] of selectedFiles.entries()) {
+      setUploadStatus(
+        `Индексация ${index + 1} из ${selectedFiles.length}: ${file.name}`,
+        ""
+      );
+      const payload = await uploadSingleFile(file);
+      const fragmentsCount = payload?.stats?.total_fragments ?? payload?.stats?.vectors_indexed ?? 0;
+      results.push(`${payload.doc_name || file.name}: ${fragmentsCount} фрагментов`);
+    }
+
+    setUploadStatus(`Индексация завершена. ${results.join(" | ")}`, "ok");
+    selectedFiles = [];
+    renderSelectedFiles();
+    await refreshCollectionStatus();
+  } catch (error) {
+    setUploadStatus(`Индексация не выполнена: ${error.message}`, "error");
+  } finally {
+    startIndexingButton.disabled = selectedFiles.length === 0;
+    clearFilesButton.disabled = false;
+    dropzone.removeAttribute("aria-disabled");
+  }
+}
+
 loadEndpoint();
+loadUserEmail();
 renderHistory();
 updateCharCount();
 setActiveView("search");
 
 searchForm.addEventListener("submit", handleSearch);
+saveEmailButton.addEventListener("click", saveUserEmail);
+checkAccessButton.addEventListener("click", async () => {
+  if (!saveUserEmail()) {
+    return;
+  }
+
+  checkAccessButton.disabled = true;
+  setAccessStatus("Проверяю allowlist в n8n...", "");
+
+  try {
+    const payload = await checkAccess();
+    const roleLabel = payload.role ? ` Роль: ${payload.role}.` : "";
+    setAccessStatus(`${payload.message || "Доступ подтверждён."}${roleLabel}`, "ok");
+    if (uploadView.hidden === false) {
+      await refreshCollectionStatus();
+    }
+  } catch (error) {
+    setAccessStatus(`Доступ не подтверждён: ${error.message}`, "error");
+  } finally {
+    checkAccessButton.disabled = false;
+  }
+});
 saveEndpointButton.addEventListener("click", saveEndpoint);
 testEndpointButton.addEventListener("click", testEndpoint);
 queryInput.addEventListener("input", updateCharCount);
@@ -365,6 +718,9 @@ clearFilesButton.addEventListener("click", () => {
   renderSelectedFiles();
   setUploadStatus("Список очищен. Можно выбрать файлы заново.");
 });
+startIndexingButton.addEventListener("click", startIndexing);
+refreshCollectionButton.addEventListener("click", refreshCollectionStatus);
+clearCollectionButton.addEventListener("click", handleClearCollection);
 
 for (const button of modeButtons) {
   button.addEventListener("click", () => {
@@ -408,3 +764,5 @@ fileInput.addEventListener("change", () => {
   handleFiles(Array.from(fileInput.files || []));
   fileInput.value = "";
 });
+
+refreshCollectionStatus();

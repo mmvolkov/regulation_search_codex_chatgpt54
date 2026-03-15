@@ -14,7 +14,7 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260315b" />
+    <link rel="stylesheet" href="./styles.css?v=20260315g" />
   </head>
   <body>
     <div class="app-shell">
@@ -104,10 +104,7 @@
             </div>
 
             <div id="answer-content" class="answer-content" hidden>
-              <p class="answer-line">
-                <strong>Ответ:</strong>
-                <span id="answer-text"></span>
-              </p>
+              <p id="answer-text" class="answer-line"></p>
 
               <p class="answer-line">
                 <strong>Источник:</strong>
@@ -161,29 +158,70 @@
               role="button"
               aria-label="Загрузка документов"
             >
-              <input
-                id="file-input"
-                type="file"
-                accept=".pdf,.docx,.txt,application/pdf,text/plain"
-                multiple
-                hidden
-              />
+              <input id="file-input" type="file" accept=".docx" multiple hidden />
 
               <div class="dropzone__icon" aria-hidden="true">📁</div>
               <p class="dropzone__title">Перетащите файлы сюда или нажмите для выбора</p>
-              <p class="dropzone__hint">PDF, DOCX, TXT — до 20 МБ каждый</p>
+              <p class="dropzone__hint">DOCX — до 20 МБ каждый</p>
             </div>
 
             <p id="upload-status" class="upload-status">
-              Интерфейс загрузки готов. После выбора покажу список файлов для индексации.
+              Выберите DOCX-файлы, затем нажмите «Индексировать».
             </p>
+
+            <section class="collection-card">
+              <div class="collection-card__head">
+                <div>
+                  <h2>Статус коллекции</h2>
+                  <p class="collection-card__lead">
+                    Сколько фрагментов сейчас хранится в локальном Qdrant.
+                  </p>
+                </div>
+                <div class="collection-card__actions">
+                  <button id="refresh-collection" class="secondary-button" type="button">
+                    Обновить
+                  </button>
+                  <button
+                    id="clear-collection"
+                    class="secondary-button secondary-button--danger"
+                    type="button"
+                  >
+                    Очистить коллекцию
+                  </button>
+                </div>
+              </div>
+
+              <div class="collection-metrics">
+                <article class="metric-card">
+                  <span class="metric-card__label">Фрагменты</span>
+                  <strong id="collection-points" class="metric-card__value">-</strong>
+                </article>
+                <article class="metric-card">
+                  <span class="metric-card__label">Статус</span>
+                  <strong id="collection-status" class="metric-card__value">Проверка...</strong>
+                </article>
+                <article class="metric-card">
+                  <span class="metric-card__label">Коллекция</span>
+                  <strong id="collection-name" class="metric-card__value">-</strong>
+                </article>
+              </div>
+
+              <p id="collection-note" class="collection-note">
+                Загружаю текущее состояние коллекции...
+              </p>
+            </section>
 
             <section id="selected-files-card" class="selected-files-card" hidden>
               <div class="selected-files-card__head">
                 <h2>Выбранные файлы</h2>
-                <button id="clear-files" class="secondary-button" type="button">
-                  Очистить список
-                </button>
+                <div class="selected-files-card__actions">
+                  <button id="start-indexing" class="primary-button" type="button">
+                    Индексировать
+                  </button>
+                  <button id="clear-files" class="secondary-button" type="button">
+                    Очистить список
+                  </button>
+                </div>
               </div>
               <div id="file-list" class="file-list"></div>
             </section>
@@ -191,17 +229,45 @@
         </section>
 
         <details class="settings-card">
-          <summary>Настройки подключения</summary>
+          <summary>Доступ и подключение</summary>
 
           <div class="settings-grid">
             <label class="field">
-              <span>Webhook URL</span>
+              <span>Рабочий e-mail</span>
+              <input
+                id="user-email"
+                type="email"
+                spellcheck="false"
+                placeholder="name@company.ru"
+                autocomplete="email"
+              />
+            </label>
+
+            <div class="settings-actions">
+              <button id="save-email" class="secondary-button" type="button">
+                Сохранить e-mail
+              </button>
+              <button id="check-access" class="secondary-button" type="button">
+                Проверить доступ
+              </button>
+            </div>
+          </div>
+
+          <p class="settings-help">
+            Временная схема доступа: фронт передаёт рабочий e-mail в `n8n`, а dispatcher
+            проверяет его по allowlist в Google Sheets.
+          </p>
+          <p id="access-status" class="endpoint-status">Доступ не проверялся</p>
+
+          <div class="settings-grid">
+            <label class="field">
+              <span>Search API URL</span>
               <input
                 id="endpoint"
                 type="url"
                 spellcheck="false"
-                value="https://plequeneluera.beget.app/webhook/regulations-search"
-                placeholder="https://.../webhook/regulations-search"
+                value="./regulation-proxy/search.php"
+                placeholder="./regulation-proxy/search.php"
               />
             </label>
 
@@ -210,13 +276,14 @@
                 Сохранить URL
               </button>
               <button id="test-endpoint" class="secondary-button" type="button">
-                Проверить webhook
+                Проверить API
               </button>
             </div>
           </div>
 
           <p class="settings-help">
-            Если production webhook ещё не активирован, временно укажите `webhook-test`.
+            По умолчанию используется локальный proxy на этом же сайте, который уже ходит в
+            `n8n` dispatcher и обходит CORS.
           </p>
           <p id="endpoint-status" class="endpoint-status">URL не проверялся</p>
         </details>
@@ -248,6 +315,6 @@
       </article>
     </template>
 
-    <script src="./app.js?v=20260315b"></script>
+    <script src="./app.js?v=20260315g"></script>
   </body>
 </html>

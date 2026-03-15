@@ -31,6 +31,10 @@ body {
   font-family: "IBM Plex Sans", sans-serif;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 button,
 input {
   font: inherit;
@@ -145,6 +149,7 @@ input {
 }
 
 .search-bar__button,
+.primary-button,
 .secondary-button {
   border: 0;
   border-radius: 22px;
@@ -161,7 +166,15 @@ input {
   font-weight: 700;
 }
 
+.primary-button {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  padding: 12px 22px;
+}
+
 .search-bar__button:hover,
+.primary-button:hover,
 .secondary-button:hover {
   transform: translateY(-1px);
 }
@@ -170,7 +183,12 @@ input {
   background: var(--accent-hover);
 }
 
+.primary-button:hover {
+  background: var(--accent-hover);
+}
+
 .search-bar__button:disabled,
+.primary-button:disabled,
 .secondary-button:disabled {
   cursor: wait;
   opacity: 0.7;
@@ -472,12 +490,79 @@ input {
   text-align: left;
 }
 
+.collection-card {
+  margin-top: 24px;
+  padding: 28px 30px;
+  border-radius: 28px;
+  background: var(--panel);
+  text-align: left;
+}
+
+.collection-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.collection-card__lead,
+.collection-note {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
+.collection-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.collection-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.metric-card {
+  padding: 18px 20px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.metric-card__label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.metric-card__value {
+  display: block;
+  margin-top: 10px;
+  font-size: 1.15rem;
+}
+
+.collection-note--error {
+  color: var(--error);
+}
+
+.collection-note--ok {
+  color: var(--success);
+}
+
 .selected-files-card__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 18px;
+}
+
+.selected-files-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .file-item__name,
@@ -542,6 +627,12 @@ input {
   color: var(--text);
 }
 
+.secondary-button--danger {
+  color: var(--error);
+  border-color: rgba(166, 70, 70, 0.22);
+  background: rgba(166, 70, 70, 0.04);
+}
+
 .settings-help,
 .endpoint-status {
   margin: 0;
@@ -572,14 +663,17 @@ summary:focus {
   .section-title,
   .feedback-row,
   .search-meta,
-  .selected-files-card__head {
+  .selected-files-card__head,
+  .collection-card__head {
     display: grid;
     grid-template-columns: 1fr;
   }
 
   .search-meta__left,
   .feedback-row__actions,
-  .settings-actions {
+  .settings-actions,
+  .collection-card__actions,
+  .selected-files-card__actions {
     flex-wrap: wrap;
   }
 
@@ -589,6 +683,10 @@ summary:focus {
 
   .search-bar__button {
     min-height: 60px;
+  }
+
+  .collection-metrics {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -614,6 +712,7 @@ summary:focus {
 
   .answer-card,
   .sources-card,
+  .collection-card,
   .selected-files-card {
     padding: 24px 18px;
   }

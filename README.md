@@ -8,7 +8,12 @@
 - публичный backend в `n8n`;
 - хранение индекса в `Qdrant`.
 
-Исходные документы лежат в [documents](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/documents).
+Корпус регламентов хранится вне Git и загружается отдельно через интерфейс или локальные утилиты индексации.
+
+## Документы проекта
+
+- Краткое описание для презентации и онбординга: [docs/PROJECT_ONE_PAGER.md](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/docs/PROJECT_ONE_PAGER.md)
+- Подробное техническое описание: [docs/PROJECT_DESCRIPTION.md](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/docs/PROJECT_DESCRIPTION.md)
 
 ## Архитектура
 
@@ -29,16 +34,13 @@
 
 ```text
 .
-├── documents/                   # исходные регламенты
 ├── n8n/
 │   └── regulation_search_hybrid.json
 ├── site/
 │   ├── app.js
 │   ├── index.html
 │   └── styles.css
-├── scripts/
-│   ├── index_documents.py
-│   └── parse_documents.py
+├── scripts/                     # локальные утилиты парсинга и индексации
 ├── src/regulation_search/
 │   ├── config.py
 │   ├── docx_parser.py
@@ -119,19 +121,14 @@ pip install -e .
 
 Заполните `OPENAI_API_KEY` в [.env.example](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/.env.example) по образцу в локальном `.env`.
 
-### 3. Посмотреть chunks
+### 3. Подготовить chunks
 
-```bash
-python scripts/parse_documents.py
-```
-
+Используйте локальную утилиту парсинга из каталога `scripts`.
 Результат попадёт в `data/chunks/chunks.jsonl`.
 
-### 4. Проиндексировать документы
+### 4. Проиндексировать корпус
 
-```bash
-python scripts/index_documents.py --recreate
-```
+Используйте локальную утилиту индексации из каталога `scripts` с пересозданием коллекции при необходимости.
 
 ## Контракт поиска
 

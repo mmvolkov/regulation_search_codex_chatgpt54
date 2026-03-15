@@ -1,0 +1,982 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "regulation-search-dispatch",
+        "responseMode": "responseNode",
+        "options": {
+          "binaryData": true
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1800,
+        320
+      ],
+      "id": "1e1b89f7-a40f-47cf-b2e9-d4f7f5a20001",
+      "name": "Webhook Dispatcher"
+    },
+    {
+      "parameters": {
+        "jsCode": "const source = $json.body && typeof $json.body === 'object' ? $json.body : $json;\nconst headers = $json.headers || {};\nconst binary = $binary || {};\nconst binaryKeys = Object.keys(binary);\nconst allowedActions = new Set(['authorize', 'search', 'upload', 'collection_status', 'collection_clear']);\nconst action = String(source.action || $json.query?.action || '').trim().toLowerCase();\nif (!allowedActions.has(action)) {\n  throw new Error('Unsupported action. Expected authorize, search, upload, collection_status or collection_clear.');\n}\nconst email = String(source.email || source.userEmail || headers['x-user-email'] || headers['X-User-Email'] || '').trim().toLowerCase();\nconst parsedLimit = Number(source.limit || source.top_k || 6);\nconst limit = Number.isFinite(parsedLimit) ? Math.max(1, Math.min(12, Math.round(parsedLimit))) : 6;\nconst normalized = {\n  action,\n  email,\n  query: String(source.query || '').trim(),\n  limit,\n  preset: String(source.preset || 'balanced').trim() || 'balanced',\n  requestId: `${$execution.id}-${Date.now()}`,\n  requestedAt: new Date().toISOString(),\n  remoteIp: headers['x-forwarded-for'] || headers['x-real-ip'] || null,\n  userAgent: headers['user-agent'] || headers['User-Agent'] || null,\n  hasFile: binaryKeys.length > 0,\n  fileField: null,\n  originalFileName: null\n};\nif (binaryKeys.length > 0) {\n  const fileField = binary.file ? 'file' : binaryKeys[0];\n  normalized.fileField = fileField;\n  normalized.originalFileName = binary[fileField]?.fileName || 'document.docx';\n  return [{ json: normalized, binary: { file: binary[fileField] } }];\n}\nreturn [{ json: normalized }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1560,
+        320
+      ],
+      "id": "a7d41450-86c5-4f77-89e0-6358ad0d0002",
+      "name": "Normalize Request"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/1nXNh8lNqoGyQFzXFZ9uGMYvSwavq5E0GWe-chaQJTqY/values/authorized_users!A:Z",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1320,
+        320
+      ],
+      "id": "7140fdb9-d3ce-4501-a741-39d29cb10003",
+      "name": "Fetch Authorized Users",
+      "credentials": {
+        "googleApi": {
+          "id": "rF8d9kF5awF0yoVh",
+          "name": "Google Service Account account n8n-integration"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const request = $items('Normalize Request', 0, 0).json;\nconst values = Array.isArray($json.values) ? $json.values : [];\nconst normalize = (value) => String(value ?? '').trim().toLowerCase();\nconst truthy = new Set(['1', 'true', 'yes', 'y', 'active', 'enabled', 'allowed', 'ok']);\nconst falsy = new Set(['0', 'false', 'no', 'n', 'inactive', 'disabled', 'blocked', 'denied']);\n\nif (!request.email) {\n  return [{ json: { ...request, isAuthorized: false, authMessage: 'Укажите рабочий e-mail.', role: 'viewer', canUpload: false, canManageCollection: false } }];\n}\n\nif (values.length === 0) {\n  return [{ json: { ...request, isAuthorized: false, authMessage: 'Лист authorized_users пуст.', role: 'viewer', canUpload: false, canManageCollection: false } }];\n}\n\nconst headers = values[0].map(normalize);\nconst rows = values.slice(1);\nconst emailIndex = headers.findIndex((header) => ['email', 'e-mail', 'mail', 'user_email'].includes(header));\nconst roleIndex = headers.findIndex((header) => ['role', 'user_role', 'access_role'].includes(header));\nconst activeIndex = headers.findIndex((header) => ['active', 'enabled', 'is_active', 'allowed', 'status', 'access'].includes(header));\nconst nameIndex = headers.findIndex((header) => ['name', 'full_name', 'user_name'].includes(header));\n\nif (emailIndex === -1) {\n  return [{ json: { ...request, isAuthorized: false, authMessage: 'В листе authorized_users нет колонки email.', role: 'viewer', canUpload: false, canManageCollection: false } }];\n}\n\nconst email = normalize(request.email);\nconst matchedRow = rows.find((row) => normalize(row[emailIndex]) === email);\n\nif (!matchedRow) {\n  return [{ json: { ...request, isAuthorized: false, authMessage: 'Пользователь не найден в списке authorized_users.', role: 'viewer', canUpload: false, canManageCollection: false } }];\n}\n\nconst activeRaw = activeIndex >= 0 ? normalize(matchedRow[activeIndex]) : '';\nconst isActive = activeIndex === -1 || activeRaw === '' ? true : truthy.has(activeRaw) || !falsy.has(activeRaw);\nconst rawRole = roleIndex >= 0 ? normalize(matchedRow[roleIndex]) : 'viewer';\nconst role = ['admin', 'editor', 'viewer'].includes(rawRole) ? rawRole : 'viewer';\nconst displayName = nameIndex >= 0 ? String(matchedRow[nameIndex] || '').trim() : '';\n\nif (!isActive) {\n  return [{ json: { ...request, isAuthorized: false, authMessage: 'Доступ для пользователя отключён.', role, displayName, canUpload: false, canManageCollection: false } }];\n}\n\nreturn [{\n  json: {\n    ...request,\n    isAuthorized: true,\n    authMessage: 'Доступ подтверждён.',\n    role,\n    displayName,\n    canUpload: ['admin', 'editor'].includes(role),\n    canManageCollection: role === 'admin'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1080,
+        320
+      ],
+      "id": "3210190b-cd95-4c4e-a91d-c1e0179a0004",
+      "name": "Resolve Authorization"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isAuthorized }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -840,
+        320
+      ],
+      "id": "dcbf2f38-32b7-4ff7-b06a-478eb8450005",
+      "name": "Is Authorized?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const auth = $items('Resolve Authorization', 0, 0).json;\nreturn [{\n  json: {\n    ok: false,\n    statusCode: 403,\n    error: 'forbidden',\n    action: auth.action,\n    email: auth.email || null,\n    message: auth.authMessage || 'Доступ запрещён.'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -600,
+        560
+      ],
+      "id": "0d8c0ce3-dbdb-40b0-9d9f-e8ba3ddd0006",
+      "name": "Build Unauthorized Response"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.action}}",
+                    "rightValue": "authorize",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "authorize"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.action}}",
+                    "rightValue": "search",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "search"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.action}}",
+                    "rightValue": "upload",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "upload"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.action}}",
+                    "rightValue": "collection_status",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "collection_status"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.action}}",
+                    "rightValue": "collection_clear",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "collection_clear"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -600,
+        200
+      ],
+      "id": "bb7f02c0-bd0d-45b5-9b1d-aafc91270007",
+      "name": "Route Action"
+    },
+    {
+      "parameters": {
+        "jsCode": "const auth = $items('Resolve Authorization', 0, 0).json;\nreturn [{\n  json: {\n    ok: true,\n    statusCode: 200,\n    action: 'authorize',\n    email: auth.email,\n    role: auth.role,\n    displayName: auth.displayName || null,\n    permissions: {\n      search: true,\n      upload: auth.canUpload,\n      collection_status: true,\n      collection_clear: auth.canManageCollection\n    },\n    message: auth.authMessage\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -340,
+        -80
+      ],
+      "id": "06f53ef5-6db8-48a1-86fa-0ac3ef390008",
+      "name": "Build Authorize Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "const auth = $items('Resolve Authorization', 0, 0).json;\nif (!auth.query) {\n  throw new Error('Search query is required');\n}\nreturn [{\n  json: {\n    query: auth.query,\n    top_k: auth.limit,\n    generate_answer: true\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -340,
+        80
+      ],
+      "id": "29ce2d4f-e588-4f5d-9f3c-c68436c10009",
+      "name": "Build Search Payload"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://plequeneluera.beget.app/search-api/api/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -100,
+        80
+      ],
+      "id": "8dd85652-a4ff-4f6d-87ce-9e7cc5e10010",
+      "name": "Call Search API"
+    },
+    {
+      "parameters": {
+        "jsCode": "const auth = $items('Resolve Authorization', 0, 0).json;\nconst payload = $json || {};\nconst hits = Array.isArray(payload.hits) ? payload.hits : Array.isArray(payload.fragments) ? payload.fragments : [];\nconst answer = String(payload.answer || hits[0]?.raw_text || hits[0]?.text || '').trim();\nconst documentRefs = hits.map((hit) => hit.doc_title || hit.doc_name || '').filter(Boolean).slice(0, 8).join(' | ');\nconst citations = hits.map((hit) => hit.citation || hit.heading || '').filter(Boolean).slice(0, 8).join(' | ');\nconst selectedChunksJson = JSON.stringify(hits.slice(0, 5)).slice(0, 45000);\nreturn [{\n  json: {\n    response: {\n      ...payload,\n      ok: true,\n      authorizedEmail: auth.email,\n      role: auth.role\n    },\n    logBody: {\n      majorDimension: 'ROWS',\n      values: [[\n        auth.requestedAt,\n        auth.requestId,\n        auth.email,\n        auth.role,\n        'search',\n        auth.query,\n        answer,\n        documentRefs,\n        citations,\n        selectedChunksJson,\n        String(hits.length),\n        String($execution.id)\n      ]]\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        140,
+        80
+      ],
+      "id": "153d8d13-a9e2-4bc2-8b5b-a0db5b8e0011",
+      "name": "Build Search Result"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/1IYQFLqJyingGBr0gjxIfR3JY1HIsRQ5SzdMu6Nt3Z-w/values/interaction_log!A:Z:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.logBody) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        380,
+        80
+      ],
+      "id": "69536dd7-0de7-4680-9ee4-873debe90012",
+      "name": "Append Interaction Log",
+      "continueOnFail": true,
+      "credentials": {
+        "googleApi": {
+          "id": "rF8d9kF5awF0yoVh",
+          "name": "Google Service Account account n8n-integration"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: $items('Build Search Result', 0, 0).json.response }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        620,
+        80
+      ],
+      "id": "d0dcf8f9-5f8d-4f95-b21d-f9f61d870013",
+      "name": "Finalize Search Response"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.canUpload }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -340,
+        320
+      ],
+      "id": "0090d5de-5a7c-4f2f-a4ba-6f7cd6330014",
+      "name": "Can Upload?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const auth = $items('Resolve Authorization', 0, 0).json;\nreturn [{\n  json: {\n    ok: false,\n    statusCode: 403,\n    error: 'forbidden',\n    action: 'upload',\n    email: auth.email,\n    message: 'Недостаточно прав для загрузки документов.'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -100,
+        480
+      ],
+      "id": "fe4e7dcb-cb13-4712-a888-5f6a2fca0015",
+      "name": "Build Upload Forbidden Response"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://plequeneluera.beget.app/search-api/api/upload",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "file"
+            },
+            {
+              "name": "preset",
+              "value": "={{$node['Normalize Request'].json.preset}}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -100,
+        320
+      ],
+      "id": "f403dc3e-8f6e-4f41-8b32-a52ba5520016",
+      "name": "Call Upload API"
+    },
+    {
+      "parameters": {
+        "jsCode": "const auth = $items('Resolve Authorization', 0, 0).json;\nconst payload = $json || {};\nconst fragmentsCount = payload?.stats?.total_fragments ?? payload?.stats?.vectors_indexed ?? payload?.stats?.indexed_chunks ?? 0;\nconst message = String(payload?.message || payload?.detail || 'Upload processed').slice(0, 5000);\nreturn [{\n  json: {\n    response: {\n      ...payload,\n      ok: payload?.ok === false ? false : true,\n      authorizedEmail: auth.email,\n      role: auth.role\n    },\n    logBody: {\n      majorDimension: 'ROWS',\n      values: [[\n        auth.requestedAt,\n        auth.requestId,\n        auth.email,\n        auth.role,\n        'upload',\n        auth.originalFileName || '',\n        payload.doc_name || auth.originalFileName || '',\n        payload?.ok === false ? 'failed' : 'success',\n        String(fragmentsCount),\n        message,\n        String($execution.id)\n      ]]\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        140,
+        320
+      ],
+      "id": "7670a9ec-264c-40b1-b8ed-ad727e0d0017",
+      "name": "Build Upload Result"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/1IYQFLqJyingGBr0gjxIfR3JY1HIsRQ5SzdMu6Nt3Z-w/values/document_loading_log!A:Z:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.logBody) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        380,
+        320
+      ],
+      "id": "b7af79e5-097d-4934-b4eb-a3e4a41b0018",
+      "name": "Append Upload Log",
+      "continueOnFail": true,
+      "credentials": {
+        "googleApi": {
+          "id": "rF8d9kF5awF0yoVh",
+          "name": "Google Service Account account n8n-integration"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: $items('Build Upload Result', 0, 0).json.response }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        620,
+        320
+      ],
+      "id": "7243275a-94b3-46bf-b4be-c5cf09c50019",
+      "name": "Finalize Upload Response"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://plequeneluera.beget.app/search-api/api/collection",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -340,
+        720
+      ],
+      "id": "3809f00d-33a7-401d-bb96-02273fd50020",
+      "name": "Call Collection Status"
+    },
+    {
+      "parameters": {
+        "jsCode": "const auth = $items('Resolve Authorization', 0, 0).json;\nreturn [{ json: { ...$json, ok: true, statusCode: 200, authorizedEmail: auth.email, role: auth.role } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -100,
+        720
+      ],
+      "id": "8824e9f5-1b60-42fa-98e0-a1e099fd0021",
+      "name": "Finalize Collection Status"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.canManageCollection }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -340,
+        920
+      ],
+      "id": "a75b4a72-3b17-42e1-b08d-d44688660022",
+      "name": "Can Clear Collection?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const auth = $items('Resolve Authorization', 0, 0).json;\nreturn [{\n  json: {\n    ok: false,\n    statusCode: 403,\n    error: 'forbidden',\n    action: 'collection_clear',\n    email: auth.email,\n    message: 'Очистка коллекции разрешена только администратору.'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -100,
+        1080
+      ],
+      "id": "3ef47f68-8f9b-4ca4-b5eb-95f413ca0023",
+      "name": "Build Clear Forbidden Response"
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "https://plequeneluera.beget.app/search-api/api/collection",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -100,
+        920
+      ],
+      "id": "504f2933-0ec2-4ef4-b446-52dd6a7f0024",
+      "name": "Call Collection Clear"
+    },
+    {
+      "parameters": {
+        "jsCode": "const auth = $items('Resolve Authorization', 0, 0).json;\nconst payload = $json || {};\nconst message = String(payload?.message || 'Collection cleared').slice(0, 5000);\nreturn [{\n  json: {\n    response: {\n      ...payload,\n      ok: true,\n      statusCode: 200,\n      authorizedEmail: auth.email,\n      role: auth.role\n    },\n    logBody: {\n      majorDimension: 'ROWS',\n      values: [[\n        auth.requestedAt,\n        auth.requestId,\n        auth.email,\n        auth.role,\n        'collection_clear',\n        '',\n        '',\n        'success',\n        '0',\n        message,\n        String($execution.id)\n      ]]\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        140,
+        920
+      ],
+      "id": "80eb060e-8dde-49c7-b207-08e743640025",
+      "name": "Build Clear Result"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/1IYQFLqJyingGBr0gjxIfR3JY1HIsRQ5SzdMu6Nt3Z-w/values/document_loading_log!A:Z:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.logBody) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        380,
+        920
+      ],
+      "id": "6947d4c6-1c56-479a-b8da-cf7d0d910026",
+      "name": "Append Clear Log",
+      "continueOnFail": true,
+      "credentials": {
+        "googleApi": {
+          "id": "rF8d9kF5awF0yoVh",
+          "name": "Google Service Account account n8n-integration"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: $items('Build Clear Result', 0, 0).json.response }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        620,
+        920
+      ],
+      "id": "928ec13b-1676-4506-92d3-7556abce0027",
+      "name": "Finalize Clear Response"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 200 }}"
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        900,
+        320
+      ],
+      "id": "7cedaa6e-aeb0-4ac9-ae22-e6f3d6dd0028",
+      "name": "Respond JSON"
+    }
+  ],
+  "connections": {
+    "Webhook Dispatcher": {
+      "main": [
+        [
+          {
+            "node": "Normalize Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Request": {
+      "main": [
+        [
+          {
+            "node": "Fetch Authorized Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Authorized Users": {
+      "main": [
+        [
+          {
+            "node": "Resolve Authorization",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Authorization": {
+      "main": [
+        [
+          {
+            "node": "Is Authorized?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Authorized?": {
+      "main": [
+        [
+          {
+            "node": "Route Action",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Unauthorized Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Unauthorized Response": {
+      "main": [
+        [
+          {
+            "node": "Respond JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Action": {
+      "main": [
+        [
+          {
+            "node": "Build Authorize Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Search Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Can Upload?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call Collection Status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Can Clear Collection?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Authorize Response": {
+      "main": [
+        [
+          {
+            "node": "Respond JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Search Payload": {
+      "main": [
+        [
+          {
+            "node": "Call Search API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Search API": {
+      "main": [
+        [
+          {
+            "node": "Build Search Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Search Result": {
+      "main": [
+        [
+          {
+            "node": "Append Interaction Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Interaction Log": {
+      "main": [
+        [
+          {
+            "node": "Finalize Search Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize Search Response": {
+      "main": [
+        [
+          {
+            "node": "Respond JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Can Upload?": {
+      "main": [
+        [
+          {
+            "node": "Call Upload API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Upload Forbidden Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Upload Forbidden Response": {
+      "main": [
+        [
+          {
+            "node": "Respond JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Upload API": {
+      "main": [
+        [
+          {
+            "node": "Build Upload Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Upload Result": {
+      "main": [
+        [
+          {
+            "node": "Append Upload Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Upload Log": {
+      "main": [
+        [
+          {
+            "node": "Finalize Upload Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize Upload Response": {
+      "main": [
+        [
+          {
+            "node": "Respond JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Collection Status": {
+      "main": [
+        [
+          {
+            "node": "Finalize Collection Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize Collection Status": {
+      "main": [
+        [
+          {
+            "node": "Respond JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Can Clear Collection?": {
+      "main": [
+        [
+          {
+            "node": "Call Collection Clear",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Clear Forbidden Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Clear Forbidden Response": {
+      "main": [
+        [
+          {
+            "node": "Respond JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Collection Clear": {
+      "main": [
+        [
+          {
+            "node": "Build Clear Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Clear Result": {
+      "main": [
+        [
+          {
+            "node": "Append Clear Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Clear Log": {
+      "main": [
+        [
+          {
+            "node": "Finalize Clear Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize Clear Response": {
+      "main": [
+        [
+          {
+            "node": "Respond JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
