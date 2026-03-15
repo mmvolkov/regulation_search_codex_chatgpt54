@@ -32,3 +32,5 @@ documents/
 # Beget deployment artifacts
 deploy/beget/regulations/*
 !deploy/beget/regulations/.gitkeep
+deploy/bundles/*
+!deploy/bundles/.gitkeep

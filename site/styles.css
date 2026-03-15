@@ -333,6 +333,20 @@ input {
   color: var(--accent);
 }
 
+.feedback-status {
+  min-height: 1.3em;
+  margin: 0;
+  color: var(--muted);
+}
+
+.feedback-status--ok {
+  color: var(--success);
+}
+
+.feedback-status--error {
+  color: var(--error);
+}
+
 .section-title {
   display: flex;
   align-items: flex-start;

@@ -5,6 +5,7 @@ const defaultEndpoint = "./regulation-proxy/search.php";
 const authEndpoint = "./regulation-proxy/auth.php";
 const uploadEndpoint = "./regulation-proxy/upload.php";
 const collectionEndpoint = "./regulation-proxy/collection.php";
+const feedbackEndpoint = "./regulation-proxy/feedback.php";
 const maxHistoryItems = 8;
 const maxFileSize = 20 * 1024 * 1024;
 const allowedExtensions = [".docx"];
@@ -32,6 +33,7 @@ const stateNode = document.querySelector("#state");
 const answerContent = document.querySelector("#answer-content");
 const answerText = document.querySelector("#answer-text");
 const answerSource = document.querySelector("#answer-source");
+const answerSourceRow = answerSource ? answerSource.closest(".answer-line") : null;
 const resultsNode = document.querySelector("#results");
 const summaryNode = document.querySelector("#summary");
 const historyList = document.querySelector("#history-list");
@@ -40,6 +42,7 @@ const historyTemplate = document.querySelector("#history-template");
 const exampleButtons = document.querySelectorAll(".example-pill");
 const feedbackYes = document.querySelector("#feedback-yes");
 const feedbackNo = document.querySelector("#feedback-no");
+const feedbackStatus = document.querySelector("#feedback-status");
 
 const dropzone = document.querySelector("#dropzone");
 const fileInput = document.querySelector("#file-input");
@@ -57,6 +60,15 @@ const collectionName = document.querySelector("#collection-name");
 const collectionNote = document.querySelector("#collection-note");
 
 let selectedFiles = [];
+let lastSearchContext = null;
+let lastFeedbackValue = "";
+const fallbackAnswerPatterns = [
+  /к сожалению/i,
+  /не найден[а-я\s]*информац/i,
+  /не удалось найти/i,
+  /ответ[а-я\s]*не найден/i,
+  /в доступных регламентах не найден/i
+];
 
 function loadEndpoint() {
   const saved = localStorage.getItem(storageKey);
@@ -154,6 +166,60 @@ function normalizeAnswerText(text) {
   return String(text).replace(/^\s*ответ:\s*/i, "").trim() || "Текст ответа отсутствует.";
 }
 
+function parseOptionalBoolean(value) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes"].includes(normalized)) {
+      return true;
+    }
+    if (["false", "0", "no"].includes(normalized)) {
+      return false;
+    }
+  }
+
+  return null;
+}
+
+function isFallbackAnswerText(text) {
+  const normalized = String(text || "").trim().toLowerCase();
+  if (!normalized || normalized === "текст ответа отсутствует.") {
+    return true;
+  }
+
+  return fallbackAnswerPatterns.some((pattern) => pattern.test(normalized));
+}
+
+function resolveAnswerMeta(data, topHit) {
+  const normalizedAnswer = normalizeAnswerText(
+    data.answer ||
+      topHit.raw_text ||
+      topHit.text
+  );
+  const explicitAnswerFound = parseOptionalBoolean(data.answerFound ?? data.answer_found);
+  const responseType = String(data.responseType || data.response_type || "").trim().toLowerCase();
+
+  let answerFound = explicitAnswerFound;
+  if (answerFound === null) {
+    if (responseType === "answer_found") {
+      answerFound = true;
+    } else if (["no_answer", "zero_results"].includes(responseType)) {
+      answerFound = false;
+    } else {
+      answerFound = !isFallbackAnswerText(normalizedAnswer);
+    }
+  }
+
+  return {
+    normalizedAnswer,
+    answerFound,
+    responseType: responseType || (answerFound ? "answer_found" : "no_answer")
+  };
+}
+
 function updateCharCount() {
   charCount.textContent = `${queryInput.value.length} / 500`;
 }
@@ -161,6 +227,20 @@ function updateCharCount() {
 function setFeedback(active) {
   feedbackYes.classList.toggle("feedback-button--active", active === "yes");
   feedbackNo.classList.toggle("feedback-button--active", active === "no");
+}
+
+function setFeedbackStatus(text, kind = "") {
+  feedbackStatus.textContent = text;
+  feedbackStatus.className = "feedback-status";
+  if (kind) {
+    feedbackStatus.classList.add(`feedback-status--${kind}`);
+  }
+}
+
+function resetFeedbackState() {
+  lastFeedbackValue = "";
+  setFeedback("");
+  setFeedbackStatus("");
 }
 
 function getHistory() {
@@ -204,7 +284,8 @@ function renderHistory() {
 
 function renderResults(data) {
   resultsNode.innerHTML = "";
-  setFeedback("");
+  resetFeedbackState();
+  lastSearchContext = null;
 
   const fragments = Array.isArray(data.fragments)
     ? data.fragments
@@ -223,16 +304,27 @@ function renderResults(data) {
   const topHit = fragments[0];
   const topTitle = topHit.doc_title || topHit.doc_name || "Источник не указан";
   const topCitation = topHit.citation || topHit.heading || topHit.fragment_type || "";
-  answerText.textContent = normalizeAnswerText(
-    data.answer ||
-      topHit.raw_text ||
-      topHit.text
-  );
-  answerSource.textContent = [topTitle, topCitation].filter(Boolean).join(" / ");
+  const { normalizedAnswer, answerFound } = resolveAnswerMeta(data, topHit);
+  answerText.textContent = normalizedAnswer;
+  answerSource.textContent = answerFound ? [topTitle, topCitation].filter(Boolean).join(" / ") : "";
+  if (answerSourceRow) {
+    answerSourceRow.hidden = !answerFound;
+  }
   showAnswer();
 
   const total = typeof data.total_fragments === "number" ? data.total_fragments : fragments.length;
-  summaryNode.textContent = `Найдено ${total} фрагментов по запросу «${data.query}».`;
+  summaryNode.textContent = answerFound
+    ? `Найдено ${total} фрагментов по запросу «${data.query}».`
+    : `Найдено ${total} фрагментов, но прямой ответ по запросу «${data.query}» не найден.`;
+  lastSearchContext = {
+    requestId: data.requestId || data.request_id || "",
+    query: data.query || "",
+    answerText: normalizedAnswer,
+    answerFound,
+    selectedDoc: answerFound ? topTitle : "",
+    selectedCitation: answerFound ? topCitation : "",
+    responseReceivedAtMs: Date.now()
+  };
 
   for (const [index, hit] of fragments.entries()) {
     const fragment = resultTemplate.content.cloneNode(true);
@@ -255,17 +347,26 @@ function renderResults(data) {
 
 async function callSearchApi({ endpoint, query, limit }) {
   const email = getUserEmail();
+  const normalizedEndpoint = endpoint.trim();
+  const isDispatcherEndpoint = /regulation-search-dispatch|\/webhook\//i.test(normalizedEndpoint);
+  const requestBody = {
+    email,
+    query,
+    top_k: limit,
+    generate_answer: true,
+    preset: "balanced"
+  };
+
+  if (isDispatcherEndpoint) {
+    requestBody.action = "search";
+  }
+
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({
-      email,
-      query,
-      top_k: limit,
-      generate_answer: true
-    })
+    body: JSON.stringify(requestBody)
   });
 
   const text = await response.text();
@@ -286,6 +387,72 @@ async function callSearchApi({ endpoint, query, limit }) {
   }
 
   return payload;
+}
+
+async function submitFeedback(value) {
+  const email = getUserEmail();
+  if (!email) {
+    setFeedbackStatus("Сначала укажите рабочий e-mail.", "error");
+    return;
+  }
+
+  if (!lastSearchContext?.requestId) {
+    setFeedbackStatus("Нужен request_id из последнего ответа, чтобы сохранить feedback.", "error");
+    return;
+  }
+
+  if (lastFeedbackValue === value) {
+    return;
+  }
+
+  feedbackYes.disabled = true;
+  feedbackNo.disabled = true;
+  setFeedbackStatus("Сохраняю отметку о полезности ответа...", "");
+
+  try {
+    const response = await fetch(feedbackEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        email,
+        request_id: lastSearchContext.requestId,
+        query: lastSearchContext.query,
+        feedback: value,
+        selected_doc: lastSearchContext.selectedDoc,
+        selected_citation: lastSearchContext.selectedCitation,
+        answer_text: lastSearchContext.answerText,
+        clicked_after_ms: Date.now() - lastSearchContext.responseReceivedAtMs
+      })
+    });
+
+    const text = await response.text();
+    let payload;
+
+    try {
+      payload = text ? JSON.parse(text) : {};
+    } catch {
+      throw new Error(`Feedback API вернул не-JSON ответ: ${text.slice(0, 220)}`);
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        payload?.message ||
+          payload?.error ||
+          `HTTP ${response.status}: ${response.statusText || "ошибка feedback API"}`
+      );
+    }
+
+    lastFeedbackValue = value;
+    setFeedback(value);
+    setFeedbackStatus("Оценка сохранена.", "ok");
+  } catch (error) {
+    setFeedbackStatus(`Не удалось сохранить feedback: ${error.message}`, "error");
+  } finally {
+    feedbackYes.disabled = false;
+    feedbackNo.disabled = false;
+  }
 }
 
 async function checkAccess() {
@@ -444,6 +611,8 @@ async function handleSearch(event) {
   }
 
   submitButton.disabled = true;
+  resetFeedbackState();
+  lastSearchContext = null;
   setState("Выполняю поиск по регламентам и собираю подтверждающие фрагменты...", "loading");
   summaryNode.textContent = "Идёт поиск по документам.";
 
@@ -711,8 +880,8 @@ checkAccessButton.addEventListener("click", async () => {
 saveEndpointButton.addEventListener("click", saveEndpoint);
 testEndpointButton.addEventListener("click", testEndpoint);
 queryInput.addEventListener("input", updateCharCount);
-feedbackYes.addEventListener("click", () => setFeedback("yes"));
-feedbackNo.addEventListener("click", () => setFeedback("no"));
+feedbackYes.addEventListener("click", () => submitFeedback("yes"));
+feedbackNo.addEventListener("click", () => submitFeedback("no"));
 clearFilesButton.addEventListener("click", () => {
   selectedFiles = [];
   renderSelectedFiles();

@@ -1,9 +1,8 @@
 <?php
-declare(strict_types=1);
 
 require __DIR__ . '/access.php';
 
-$upstreamUrl = 'https://plequeneluera.beget.app/search-api/api/upload';
+$upstreamUrl = regulation_search_dispatcher_url();
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -24,23 +23,32 @@ if (!isset($_FILES['file']) || !is_array($_FILES['file'])) {
 }
 
 $file = $_FILES['file'];
-if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+$fileError = isset($file['error']) ? $file['error'] : UPLOAD_ERR_NO_FILE;
+if ($fileError !== UPLOAD_ERR_OK) {
     http_response_code(400);
     echo json_encode([
         'message' => 'Uploaded file is invalid',
-        'errorCode' => $file['error'] ?? null,
+        'errorCode' => isset($file['error']) ? $file['error'] : null,
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
-regulation_search_require_user($_POST['email'] ?? '', true, false);
+$preset = isset($_POST['preset']) ? $_POST['preset'] : 'balanced';
+$fileSizeBytes = isset($file['size']) ? $file['size'] : 0;
+$fileType = !empty($file['type']) ? $file['type'] : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+$fileName = !empty($file['name']) ? $file['name'] : 'document.docx';
 
 $postFields = [
-    'preset' => $_POST['preset'] ?? 'balanced',
+    'action' => 'upload',
+    'email' => regulation_search_normalize_email(isset($_POST['email']) ? (string) $_POST['email'] : ''),
+    'preset' => $preset,
+    'file_size_bytes' => (string) $fileSizeBytes,
+    'mime_type' => (string) $fileType,
+    'file_sha1' => sha1_file($file['tmp_name']) ?: '',
     'file' => new CURLFile(
         $file['tmp_name'],
-        $file['type'] ?: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        $file['name'] ?: 'document.docx'
+        $fileType,
+        $fileName
     ),
 ];
 
@@ -56,9 +64,9 @@ $ch = curl_init($upstreamUrl);
 curl_setopt_array($ch, [
     CURLOPT_POST => true,
     CURLOPT_POSTFIELDS => $postFields,
-    CURLOPT_HTTPHEADER => [
+    CURLOPT_HTTPHEADER => regulation_search_forwarded_headers([
         'Accept: application/json',
-    ],
+    ]),
     CURLOPT_RETURNTRANSFER => true,
     CURLOPT_TIMEOUT => 600,
 ]);
@@ -74,7 +82,7 @@ if ($responseBody === false) {
     ]);
 }
 
-$statusCode = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+$statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
 $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
 curl_close($ch);
 

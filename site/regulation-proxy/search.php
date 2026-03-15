@@ -1,9 +1,8 @@
 <?php
-declare(strict_types=1);
 
 require __DIR__ . '/access.php';
 
-$upstreamUrl = 'https://plequeneluera.beget.app/search-api/api/search';
+$upstreamUrl = regulation_search_dispatcher_url();
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -31,22 +30,47 @@ if (!is_array($payload)) {
     ]);
 }
 
-regulation_search_require_user($payload['email'] ?? ($_SERVER['HTTP_X_USER_EMAIL'] ?? ''));
+$email = '';
+if (isset($payload['email'])) {
+    $email = (string) $payload['email'];
+} elseif (isset($_SERVER['HTTP_X_USER_EMAIL'])) {
+    $email = (string) $_SERVER['HTTP_X_USER_EMAIL'];
+}
+
+$topK = 6;
+if (isset($payload['top_k'])) {
+    $topK = (int) $payload['top_k'];
+} elseif (isset($payload['limit'])) {
+    $topK = (int) $payload['limit'];
+}
+
+$generateAnswer = true;
+if (isset($payload['generate_answer'])) {
+    $generateAnswer = (bool) $payload['generate_answer'];
+}
+
+$preset = isset($payload['preset']) ? trim((string) $payload['preset']) : 'balanced';
+if ($preset === '') {
+    $preset = 'balanced';
+}
 
 $requestBody = [
-    'query' => trim((string) ($payload['query'] ?? '')),
-    'top_k' => (int) ($payload['top_k'] ?? $payload['limit'] ?? 6),
-    'generate_answer' => (bool) ($payload['generate_answer'] ?? true),
+    'action' => 'search',
+    'email' => regulation_search_normalize_email($email),
+    'query' => trim((string) (isset($payload['query']) ? $payload['query'] : '')),
+    'top_k' => $topK,
+    'generate_answer' => $generateAnswer,
+    'preset' => $preset,
 ];
 
 $ch = curl_init($upstreamUrl);
 curl_setopt_array($ch, [
     CURLOPT_POST => true,
     CURLOPT_POSTFIELDS => json_encode($requestBody, JSON_UNESCAPED_UNICODE),
-    CURLOPT_HTTPHEADER => [
+    CURLOPT_HTTPHEADER => regulation_search_forwarded_headers([
         'Accept: application/json',
         'Content-Type: application/json',
-    ],
+    ]),
     CURLOPT_RETURNTRANSFER => true,
     CURLOPT_TIMEOUT => 180,
 ]);
@@ -62,7 +86,7 @@ if ($responseBody === false) {
     ]);
 }
 
-$statusCode = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+$statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
 $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
 curl_close($ch);
 
