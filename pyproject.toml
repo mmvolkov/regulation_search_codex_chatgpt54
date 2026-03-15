@@ -9,10 +9,13 @@ description = "Hybrid search over DOCX regulations with Qdrant and n8n"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "fastapi>=0.115.0",
   "fastembed>=0.7.0",
   "openai>=1.68.0",
+  "python-multipart>=0.0.9",
   "python-dotenv>=1.0.1",
   "qdrant-client>=1.14.2",
+  "uvicorn>=0.34.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -20,4 +23,3 @@ where = ["src"]
 
 [tool.ruff]
 line-length = 100
-

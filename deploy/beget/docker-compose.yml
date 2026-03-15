@@ -1,0 +1,192 @@
+version: "3.8"
+
+volumes:
+  traefik_data:
+    driver: local-persist
+    driver_opts:
+      mountpoint: /opt/beget/n8n/traefik_data
+  n8n_storage:
+    driver: local-persist
+    driver_opts:
+      mountpoint: /opt/beget/n8n/n8n_storage
+  db_storage:
+    driver: local-persist
+    driver_opts:
+      mountpoint: /opt/beget/n8n/db_storage
+  redis_storage:
+    driver: local-persist
+    driver_opts:
+      mountpoint: /opt/beget/n8n/redis_storage
+  qdrant_storage:
+    driver: local-persist
+    driver_opts:
+      mountpoint: /opt/beget/n8n/qdrant_storage
+
+x-shared: &shared
+  restart: always
+  image: ${N8N_IMAGE:-docker.n8n.io/n8nio/n8n:latest}
+  env_file:
+    - .env
+  links:
+    - postgres
+    - redis
+  volumes:
+    - n8n_storage:/home/node/.n8n
+    - ./healthcheck.js:/healthcheck.js:ro
+    - ./regulations:/files/regulations
+    - ${PROJECT_ROOT:-/opt/rag/RAG_Regulation_Search_Codex53}:${PROJECT_ROOT:-/opt/rag/RAG_Regulation_Search_Codex53}
+    - ${UPLOAD_DIR_ROOT:-/tmp/rag_regulation_uploads}:${UPLOAD_DIR_ROOT:-/tmp/rag_regulation_uploads}
+  depends_on:
+    redis:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+  environment:
+    N8N_ENABLE_COMMAND_EXECUTION: "true"
+    NODES_EXCLUDE: '["n8n-nodes-base.localFileTrigger"]'
+
+services:
+  traefik:
+    image: traefik:2.10.4
+    restart: always
+    command:
+      - "--api=true"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.mytlschallenge.acme.tlschallenge=true"
+      - "--certificatesresolvers.mytlschallenge.acme.email=${TRAEFIK_ACME_EMAIL:-volkovmm@outlook.com}"
+      - "--certificatesresolvers.mytlschallenge.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - traefik_data:/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  postgres:
+    image: postgres:11
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - db_storage:/var/lib/postgresql/data
+      - ./init-data.sh:/docker-entrypoint-initdb.d/init-data.sh:ro
+    ports:
+      - 127.0.0.1:5432:5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:6-alpine
+    restart: always
+    volumes:
+      - redis_storage:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.14.1
+    restart: always
+    ports:
+      - 127.0.0.1:6333:6333
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+  ingest-api:
+    restart: always
+    build:
+      context: ${PROJECT_ROOT:-/opt/rag/RAG_Regulation_Search_Codex53}
+      dockerfile: deploy/beget/Dockerfile.ingest-api
+    image: rag-regulation-ingest-api:latest
+    env_file:
+      - .env
+    environment:
+      PROJECT_ROOT: ${PROJECT_ROOT:-/opt/rag/RAG_Regulation_Search_Codex53}
+      UPLOAD_DIR_ROOT: ${UPLOAD_DIR_ROOT:-/tmp/rag_regulation_uploads}
+      INGEST_API_HOST: "0.0.0.0"
+      INGEST_API_PORT: "8090"
+    volumes:
+      - ${PROJECT_ROOT:-/opt/rag/RAG_Regulation_Search_Codex53}:${PROJECT_ROOT:-/opt/rag/RAG_Regulation_Search_Codex53}
+      - ${UPLOAD_DIR_ROOT:-/tmp/rag_regulation_uploads}:${UPLOAD_DIR_ROOT:-/tmp/rag_regulation_uploads}
+    depends_on:
+      - qdrant
+    expose:
+      - "8090"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  n8n:
+    <<: *shared
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.n8n.rule=Host(`${PUBLIC_HOST:-plequeneluera.beget.app}`)
+      - traefik.http.routers.n8n.tls=true
+      - traefik.http.routers.n8n.entrypoints=web,websecure
+      - traefik.http.routers.n8n.tls.certresolver=mytlschallenge
+      - traefik.http.middlewares.n8n.headers.SSLRedirect=true
+      - traefik.http.middlewares.n8n.headers.STSSeconds=315360000
+      - traefik.http.middlewares.n8n.headers.browserXSSFilter=true
+      - traefik.http.middlewares.n8n.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.n8n.headers.forceSTSHeader=true
+      - traefik.http.middlewares.n8n.headers.SSLHost=${PUBLIC_HOST:-plequeneluera.beget.app}
+      - traefik.http.middlewares.n8n.headers.STSIncludeSubdomains=true
+      - traefik.http.middlewares.n8n.headers.STSPreload=true
+      - traefik.http.routers.n8n.middlewares=n8n@docker
+    ports:
+      - 127.0.0.1:5678:5678
+    healthcheck:
+      test: ["CMD", "node", "/healthcheck.js"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  n8n-worker:
+    <<: *shared
+    command: worker
+    depends_on:
+      - n8n
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:5678/healthz || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  regulation-search-api:
+    restart: always
+    build:
+      context: ${REGULATION_SEARCH_API_ROOT:-/opt/regulation_search_v2/backend}
+    image: regulation-search-api:latest
+    env_file:
+      - ${REGULATION_SEARCH_API_ENV_FILE:-/opt/regulation_search_v2/backend/.env}
+    depends_on:
+      - qdrant
+    expose:
+      - "8000"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.regulation-api.rule=Host(`${PUBLIC_HOST:-plequeneluera.beget.app}`) && PathPrefix(`/search-api`)
+      - traefik.http.routers.regulation-api.tls=true
+      - traefik.http.routers.regulation-api.entrypoints=web,websecure
+      - traefik.http.routers.regulation-api.tls.certresolver=mytlschallenge
+      - traefik.http.middlewares.regulation-api-strip.stripprefix.prefixes=/search-api
+      - traefik.http.routers.regulation-api.middlewares=regulation-api-strip@docker
+      - traefik.http.services.regulation-api.loadbalancer.server.port=8000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10

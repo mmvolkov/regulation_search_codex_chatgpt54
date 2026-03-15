@@ -55,12 +55,20 @@ class RegulationIndexer:
         recreate_collection: bool = False,
         documents_dir: Path | None = None,
     ) -> IndexStats:
+        chunks = self.parse(documents_dir)
+        return self.index_chunks(chunks, recreate_collection=recreate_collection)
+
+    def index_chunks(
+        self,
+        chunks: Sequence[ChunkRecord],
+        *,
+        recreate_collection: bool = False,
+    ) -> IndexStats:
         if not self.settings.openai_api_key:
             raise ValueError("OPENAI_API_KEY is required for indexing dense embeddings.")
 
-        chunks = self.parse(documents_dir)
         if not chunks:
-            raise ValueError("No chunks produced from documents directory.")
+            raise ValueError("No chunks provided for indexing.")
 
         dense_vectors = self._dense_embeddings([chunk.text for chunk in chunks[:1]])
         dense_size = len(dense_vectors[0])
@@ -140,4 +148,3 @@ class RegulationIndexer:
             points=points,
             wait=True,
         )
-

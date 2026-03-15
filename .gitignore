@@ -28,3 +28,7 @@ venv/
 data/
 qdrant_storage/
 documents/
+
+# Beget deployment artifacts
+deploy/beget/regulations/*
+!deploy/beget/regulations/.gitkeep

@@ -1,114 +1,98 @@
 # Regulation Search
 
-Поиск по корпоративным регламентам в формате `docx` с акцентом на:
+Поиск по корпоративным регламентам в формате `docx` с опорой на:
 
-- сложные таблицы;
-- разнородные стили Word;
-- гибридный поиск `dense + sparse`;
-- публичный backend в `n8n`;
-- хранение индекса в `Qdrant`.
+- предметный парсинг сложных Word-документов;
+- индексацию в `Qdrant`;
+- production-фронтенд на Beget;
+- `PHP` proxy для same-origin доступа;
+- `n8n` как orchestration-слой и площадку для workflow.
 
-Корпус регламентов хранится вне Git и загружается отдельно через интерфейс или локальные утилиты индексации.
+Корпус регламентов и часть production backend живут вне Git и подключаются отдельно.
+
+## Профили запуска
+
+В репозитории теперь явно разделены два контура:
+
+- `docker-compose.yml` в корне: локальный dev-контур, который поднимает только `Qdrant`;
+- `deploy/beget/docker-compose.yml`: production-образец для Beget с `Traefik`, `n8n`, `Postgres`, `Redis`, `Qdrant`, `ingest-api` и внешним `regulation-search-api`.
+
+Это важно: корневой compose не описывает боевой стек целиком.
 
 ## Документы проекта
 
-- Краткое описание для презентации и онбординга: [docs/PROJECT_ONE_PAGER.md](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/docs/PROJECT_ONE_PAGER.md)
+- Краткое описание: [docs/PROJECT_ONE_PAGER.md](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/docs/PROJECT_ONE_PAGER.md)
 - Подробное техническое описание: [docs/PROJECT_DESCRIPTION.md](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/docs/PROJECT_DESCRIPTION.md)
-
-## Архитектура
-
-Репозиторий собран как практичный MVP:
-
-- `docker-compose.yml` поднимает локальный `Qdrant`;
-- Python-слой читает `docx`, нормализует абзацы и строки таблиц, режет их на поисковые chunks и загружает в `Qdrant`;
-- `n8n` workflow принимает поисковый запрос, строит dense embedding через OpenAI и выполняет hybrid search в `Qdrant`;
-- фронтенд на Beget может стучаться в публичный webhook `n8n`.
-
-Почему так:
-
-- backend остаётся в `n8n`, как вы и хотели;
-- сложную подготовку `docx` и индексацию проще и надёжнее делать Python-скриптами;
-- hybrid retrieval лучше работает по регламентам, где есть и точные формулировки, и свободные вопросы.
+- Схема логирования dispatcher: [docs/LOGGING_SCHEMA.md](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/docs/LOGGING_SCHEMA.md)
 
 ## Структура
 
 ```text
 .
+├── deploy/
+│   └── beget/
+│       ├── .env.example
+│       ├── docker-compose.yml
+│       ├── Dockerfile.ingest-api
+│       ├── healthcheck.js
+│       ├── init-data.sh
+│       └── README.md
+├── docs/
 ├── n8n/
+│   ├── regulation_search_dispatcher.json
 │   └── regulation_search_hybrid.json
+├── scripts/
 ├── site/
 │   ├── app.js
 │   ├── index.html
-│   └── styles.css
-├── scripts/                     # локальные утилиты парсинга и индексации
+│   ├── styles.css
+│   └── regulation-proxy/
 ├── src/regulation_search/
 │   ├── config.py
 │   ├── docx_parser.py
+│   ├── ingest_api.py
 │   └── qdrant_indexer.py
 ├── .env.example
 ├── docker-compose.yml
 └── pyproject.toml
 ```
 
-## Как это работает
+## Архитектура
 
-### 1. Парсинг `docx`
+### Локальная разработка
 
-Парсер не пытается доверять только стилям Word. Он:
+- Python-слой парсит `docx`, режет документы на chunks и индексирует их в `Qdrant`;
+- локально через корневой [docker-compose.yml](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/docker-compose.yml) поднимается только `Qdrant`;
+- для индексации используются [scripts/parse_documents.py](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/scripts/parse_documents.py) и [scripts/index_documents.py](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/scripts/index_documents.py).
 
-- читает OOXML напрямую;
-- восстанавливает разделы по нумерации типа `1`, `1.2`, `4.3.1`;
-- извлекает абзацы;
-- превращает таблицы в отдельные поисковые блоки по строкам;
-- сохраняет метаданные для цитирования: документ, раздел, тип блока, источник.
+### Текущий production-контур
 
-### 2. Индексация в `Qdrant`
+На Beget фактический рабочий поток выглядит так:
 
-Для каждого chunk создаются:
+`Frontend -> PHP proxy -> search-api -> Qdrant/OpenAI`
 
-- dense embedding через OpenAI;
-- sparse embedding через `Qdrant/bm25`.
+Дополнительно рядом живут:
 
-В коллекции хранятся два именованных вектора:
+- `n8n` и `n8n-worker` для automation / orchestration;
+- `Traefik` для HTTPS и routing;
+- `Postgres` и `Redis` для `n8n`;
+- `ingest-api` как отдельный ingestion-контур;
+- внешний `regulation-search-api`, который не хранится в этом репозитории целиком.
 
-- `dense`
-- `bm25`
+### Роль `n8n`
 
-### 3. Поиск из `n8n`
-
-Workflow в [n8n/regulation_search_hybrid.json](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/n8n/regulation_search_hybrid.json):
-
-1. принимает `POST /webhook/regulations-search`;
-2. валидирует запрос;
-3. запрашивает dense embedding в OpenAI;
-4. отправляет hybrid query в `Qdrant`;
-5. возвращает найденные фрагменты и цитаты.
-
-### 4. Статический фронтенд на Beget
-
-Фронт лежит в [site](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/site) и не требует сборки:
-
-- [site/index.html](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/site/index.html)
-- [site/styles.css](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/site/styles.css)
-- [site/app.js](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/site/app.js)
-
-Он умеет:
-
-- задавать webhook URL прямо в интерфейсе;
-- сохранять URL в `localStorage`;
-- отправлять поисковый запрос в `n8n`;
-- показывать результаты с цитатами, score и метаданными.
+`n8n` в проекте не является единственным backend. Сейчас он используется как orchestration-слой и место для workflow, а production search/upload-контур может идти напрямую через `search-api` и `PHP` proxy.
 
 ## Локальный запуск
 
-### 1. Поднять Qdrant
+### 1. Поднять `Qdrant`
 
 ```bash
 cd /Users/michaelvolkov/projects/regulation_search_codex_chatgpt54
 docker compose up -d
 ```
 
-После старта Qdrant будет доступен на [http://localhost:6333](http://localhost:6333).
+После старта `Qdrant` будет доступен на [http://localhost:6333](http://localhost:6333).
 
 ### 2. Настроить окружение
 
@@ -119,102 +103,75 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-Заполните `OPENAI_API_KEY` в [.env.example](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/.env.example) по образцу в локальном `.env`.
+Заполните переменные в [.env.example](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/.env.example), прежде всего `OPENAI_API_KEY`.
 
 ### 3. Подготовить chunks
 
-Используйте локальную утилиту парсинга из каталога `scripts`.
-Результат попадёт в `data/chunks/chunks.jsonl`.
+```bash
+PYTHONPATH=src python3 scripts/parse_documents.py
+```
+
+Результат попадет в `data/chunks/chunks.jsonl`.
 
 ### 4. Проиндексировать корпус
 
-Используйте локальную утилиту индексации из каталога `scripts` с пересозданием коллекции при необходимости.
-
-## Контракт поиска
-
-Пример запроса в `n8n`:
-
-```json
-{
-  "query": "кто согласует командировку и какие документы нужны для отчета",
-  "limit": 6
-}
-```
-
-Пример ответа:
-
-```json
-{
-  "query": "кто согласует командировку и какие документы нужны для отчета",
-  "limit": 6,
-  "mode": "search",
-  "count": 6,
-  "hits": [
-    {
-      "rank": 1,
-      "score": 0.87,
-      "doc_title": "13.11 Командировки",
-      "citation": "13.11 Командировки / 4. Как отчитаться по командировке / table",
-      "raw_text": "Пакет документов для отчета за командировку ...",
-      "text": "Документ: ..."
-    }
-  ]
-}
-```
-
-## Импорт в `n8n`
-
-1. Откройте ваш `n8n` на Beget.
-2. Импортируйте [n8n/regulation_search_hybrid.json](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/n8n/regulation_search_hybrid.json).
-3. В переменных окружения `n8n` задайте:
-
 ```bash
-OPENAI_API_KEY=...
-OPENAI_EMBEDDING_MODEL=text-embedding-3-large
-QDRANT_URL=http://<host-or-container>:6333
-QDRANT_COLLECTION=regulations_hybrid
-QDRANT_DENSE_VECTOR_NAME=dense
-QDRANT_SPARSE_VECTOR_NAME=bm25
-QDRANT_API_KEY=
+PYTHONPATH=src python3 scripts/index_documents.py --recreate
 ```
 
-4. Активируйте workflow и используйте `Production URL`.
+## Production на Beget
 
-## Как деплоить у вас
+Production-образец вынесен в [deploy/beget/docker-compose.yml](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/deploy/beget/docker-compose.yml).
 
-Рекомендуемый маршрут:
+Сопутствующие файлы:
 
-- `n8n` живёт на Beget и отдаёт публичный webhook;
-- `Qdrant` поднимается через `docker compose` там, где он доступен по сети из `n8n`;
-- фронтенд на Beget вызывает webhook `n8n`, а не `Qdrant` напрямую.
+- [deploy/beget/.env.example](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/deploy/beget/.env.example)
+- [deploy/beget/Dockerfile.ingest-api](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/deploy/beget/Dockerfile.ingest-api)
+- [deploy/beget/healthcheck.js](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/deploy/beget/healthcheck.js)
+- [deploy/beget/init-data.sh](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/deploy/beget/init-data.sh)
+- [deploy/beget/README.md](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/deploy/beget/README.md)
 
-### Фронтенд на `ayezodumbob.beget.app`
+Что важно понимать:
 
-У вас уже создан отдельный сайт для `ayezodumbob.beget.app`, значит фронт можно выкладывать прямо в:
+- `regulation-search-api` в production собирается из отдельного backend checkout, а не из этого репозитория;
+- `deploy/beget/docker-compose.yml` нужен как честная документация и reproducible scaffold;
+- текущий production URL фронтенда и его proxy могут жить отдельно от `n8n`.
 
-```text
-ayezodumbob.beget.app/public_html
-```
+## `ingest-api`
 
-Минимальный деплой:
+В репозитории добавлен минимальный ingestion API на FastAPI:
 
-1. Скопировать содержимое [site](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/site) в `public_html`.
-2. Открыть [site/app.js](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/site/app.js) или поле `Webhook URL` в интерфейсе и указать production webhook `n8n`.
-3. Проверить HTTPS и CORS между `ayezodumbob.beget.app` и `plequeneluera.beget.app`.
+- [src/regulation_search/ingest_api.py](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/src/regulation_search/ingest_api.py)
 
-Если хотите не править код перед каждой проверкой, оставляйте URL пустым или меняйте его прямо через поле в интерфейсе: фронт сохранит его в браузере.
+Он предназначен для:
 
-Если `Qdrant` стоит не внутри той же машины, где `n8n`, важно:
+- healthcheck контейнера;
+- загрузки `DOCX`;
+- парсинга файла в chunks;
+- индексации загруженного файла в `Qdrant`.
 
-- открыть сетевой доступ к `6333` только для нужной среды;
-- либо повесить reverse proxy перед `Qdrant`;
-- либо использовать приватную сеть/VPN.
+Основные endpoint:
 
-## Следующие шаги
+- `GET /health`
+- `POST /upload`
+- `POST /ingest`
 
-Следующий логичный этап:
+## `n8n` workflow
 
-1. проверить локальную индексацию;
-2. импортировать workflow в `n8n`;
-3. добавить режим `answer`, который будет строить ответ по найденным фрагментам с цитатами;
-4. сделать простой фронтенд поиска на Beget.
+В репозитории лежат два основных workflow:
+
+- [n8n/regulation_search_hybrid.json](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/n8n/regulation_search_hybrid.json)
+- [n8n/regulation_search_dispatcher.json](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/n8n/regulation_search_dispatcher.json)
+
+Они полезны как:
+
+- reference implementation;
+- экспортируемые workflow для Beget;
+- база для дальнейшей стабилизации dispatcher-контура.
+
+## Что сейчас считается правдой
+
+- корневой compose не равен production compose;
+- production на Beget шире, чем локальный dev-контур;
+- `search-api` остается внешней частью боевой архитектуры;
+- `n8n` в проекте важен, но не обязан быть единственной точкой входа для production search.
