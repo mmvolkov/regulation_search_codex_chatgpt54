@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
 
-$upstreamUrl = 'https://plequeneluera.beget.app/webhook/regulation-search-dispatch';
+require __DIR__ . '/access.php';
+
+$upstreamUrl = 'https://plequeneluera.beget.app/search-api/api/upload';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -31,9 +33,9 @@ if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
     exit;
 }
 
+regulation_search_require_user($_POST['email'] ?? '', true, false);
+
 $postFields = [
-    'action' => 'upload',
-    'email' => trim((string) ($_POST['email'] ?? '')),
     'preset' => $_POST['preset'] ?? 'balanced',
     'file' => new CURLFile(
         $file['tmp_name'],
@@ -66,12 +68,10 @@ $responseBody = curl_exec($ch);
 if ($responseBody === false) {
     $error = curl_error($ch);
     curl_close($ch);
-    http_response_code(502);
-    echo json_encode([
-        'message' => 'Upload dispatcher request failed',
+    regulation_search_json_response(502, [
+        'message' => 'Upload API request failed',
         'error' => $error,
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
+    ]);
 }
 
 $statusCode = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);

@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
 
-$upstreamUrl = 'https://plequeneluera.beget.app/webhook/regulation-search-dispatch';
+require __DIR__ . '/access.php';
+
+$upstreamUrl = 'https://plequeneluera.beget.app/search-api/api/search';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -24,24 +26,23 @@ if ($rawBody === false || $rawBody === '') {
 
 $payload = json_decode($rawBody, true);
 if (!is_array($payload)) {
-    http_response_code(400);
-    echo json_encode([
+    regulation_search_json_response(400, [
         'message' => 'Invalid JSON body',
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
+    ]);
 }
 
-$dispatcherBody = [
-    'action' => 'search',
-    'email' => trim((string) ($payload['email'] ?? ($_SERVER['HTTP_X_USER_EMAIL'] ?? ''))),
+regulation_search_require_user($payload['email'] ?? ($_SERVER['HTTP_X_USER_EMAIL'] ?? ''));
+
+$requestBody = [
     'query' => trim((string) ($payload['query'] ?? '')),
-    'limit' => (int) ($payload['top_k'] ?? $payload['limit'] ?? 6),
+    'top_k' => (int) ($payload['top_k'] ?? $payload['limit'] ?? 6),
+    'generate_answer' => (bool) ($payload['generate_answer'] ?? true),
 ];
 
 $ch = curl_init($upstreamUrl);
 curl_setopt_array($ch, [
     CURLOPT_POST => true,
-    CURLOPT_POSTFIELDS => json_encode($dispatcherBody, JSON_UNESCAPED_UNICODE),
+    CURLOPT_POSTFIELDS => json_encode($requestBody, JSON_UNESCAPED_UNICODE),
     CURLOPT_HTTPHEADER => [
         'Accept: application/json',
         'Content-Type: application/json',
@@ -55,12 +56,10 @@ $responseBody = curl_exec($ch);
 if ($responseBody === false) {
     $error = curl_error($ch);
     curl_close($ch);
-    http_response_code(502);
-    echo json_encode([
-        'message' => 'Search dispatcher request failed',
+    regulation_search_json_response(502, [
+        'message' => 'Search API request failed',
         'error' => $error,
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
+    ]);
 }
 
 $statusCode = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);

@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-$upstreamUrl = 'https://plequeneluera.beget.app/webhook/regulation-search-dispatch';
+require __DIR__ . '/access.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -24,50 +24,30 @@ if ($rawBody === false || $rawBody === '') {
 
 $payload = json_decode($rawBody, true);
 if (!is_array($payload)) {
-    http_response_code(400);
-    echo json_encode([
+    regulation_search_json_response(400, [
         'message' => 'Invalid JSON body',
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
+    ]);
 }
 
-$dispatcherBody = [
-    'action' => 'authorize',
-    'email' => trim((string) ($payload['email'] ?? '')),
-];
+$user = regulation_search_resolve_user($payload['email'] ?? '');
+if ($user === null) {
+    regulation_search_json_response(403, [
+        'ok' => false,
+        'error' => 'forbidden',
+        'message' => 'Пользователь не найден в allowlist сайта.',
+    ]);
+}
 
-$ch = curl_init($upstreamUrl);
-curl_setopt_array($ch, [
-    CURLOPT_POST => true,
-    CURLOPT_POSTFIELDS => json_encode($dispatcherBody, JSON_UNESCAPED_UNICODE),
-    CURLOPT_HTTPHEADER => [
-        'Accept: application/json',
-        'Content-Type: application/json',
+regulation_search_json_response(200, [
+    'ok' => true,
+    'message' => 'Доступ подтверждён.',
+    'email' => $user['email'],
+    'role' => $user['role'],
+    'displayName' => $user['displayName'],
+    'permissions' => [
+        'search' => true,
+        'upload' => $user['canUpload'],
+        'collection_status' => true,
+        'collection_clear' => $user['canManageCollection'],
     ],
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_TIMEOUT => 180,
 ]);
-
-$responseBody = curl_exec($ch);
-
-if ($responseBody === false) {
-    $error = curl_error($ch);
-    curl_close($ch);
-    http_response_code(502);
-    echo json_encode([
-        'message' => 'Auth dispatcher request failed',
-        'error' => $error,
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
-}
-
-$statusCode = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-$contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
-curl_close($ch);
-
-if (is_string($contentType) && $contentType !== '') {
-    header('Content-Type: ' . $contentType);
-}
-
-http_response_code($statusCode > 0 ? $statusCode : 200);
-echo $responseBody;

@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
 
-$upstreamUrl = 'https://plequeneluera.beget.app/webhook/regulation-search-dispatch';
+require __DIR__ . '/access.php';
+
+$upstreamUrl = 'https://plequeneluera.beget.app/search-api/api/collection';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -14,18 +16,14 @@ if ($method !== 'GET' && $method !== 'DELETE') {
     exit;
 }
 
-$dispatcherBody = [
-    'action' => $method === 'DELETE' ? 'collection_clear' : 'collection_status',
-    'email' => trim((string) ($_SERVER['HTTP_X_USER_EMAIL'] ?? '')),
-];
+$email = $_SERVER['HTTP_X_USER_EMAIL'] ?? '';
+regulation_search_require_user($email, false, $method === 'DELETE');
 
 $ch = curl_init($upstreamUrl);
 curl_setopt_array($ch, [
-    CURLOPT_POST => true,
-    CURLOPT_POSTFIELDS => json_encode($dispatcherBody, JSON_UNESCAPED_UNICODE),
+    CURLOPT_CUSTOMREQUEST => $method,
     CURLOPT_HTTPHEADER => [
         'Accept: application/json',
-        'Content-Type: application/json',
     ],
     CURLOPT_RETURNTRANSFER => true,
     CURLOPT_TIMEOUT => 180,
@@ -36,12 +34,10 @@ $responseBody = curl_exec($ch);
 if ($responseBody === false) {
     $error = curl_error($ch);
     curl_close($ch);
-    http_response_code(502);
-    echo json_encode([
-        'message' => 'Collection dispatcher request failed',
+    regulation_search_json_response(502, [
+        'message' => 'Collection API request failed',
         'error' => $error,
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
+    ]);
 }
 
 $statusCode = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);

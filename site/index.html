@@ -254,8 +254,8 @@
           </div>
 
           <p class="settings-help">
-            Временная схема доступа: фронт передаёт рабочий e-mail в `n8n`, а dispatcher
-            проверяет его по allowlist в Google Sheets.
+            Временная схема доступа: фронт передаёт рабочий e-mail в локальный PHP proxy,
+            а сайт проверяет его по серверному allowlist.
           </p>
           <p id="access-status" class="endpoint-status">Доступ не проверялся</p>
 
@@ -282,8 +282,8 @@
           </div>
 
           <p class="settings-help">
-            По умолчанию используется локальный proxy на этом же сайте, который уже ходит в
-            `n8n` dispatcher и обходит CORS.
+            По умолчанию используется локальный proxy на этом же сайте, который ходит в
+            `search-api` и обходит CORS.
           </p>
           <p id="endpoint-status" class="endpoint-status">URL не проверялся</p>
         </details>
