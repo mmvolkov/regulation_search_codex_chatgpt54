@@ -466,7 +466,7 @@ a {
 
 .search-form__controls {
   display: grid;
-  grid-template-columns: 110px minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -475,6 +475,11 @@ a {
   color: var(--muted);
   font-size: 0.92rem;
   line-height: 1.55;
+}
+
+.search-form__settings-note {
+  display: grid;
+  gap: 6px;
 }
 
 .meta-control {
@@ -497,6 +502,12 @@ a {
 
 .meta-control--stack input {
   width: 100%;
+}
+
+.meta-control--stack input[readonly] {
+  color: var(--ink);
+  background: linear-gradient(180deg, rgba(244, 248, 253, 0.96) 0%, rgba(255, 255, 255, 1) 100%);
+  cursor: default;
 }
 
 .meta-control__select {

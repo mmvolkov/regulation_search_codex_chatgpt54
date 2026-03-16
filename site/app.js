@@ -2,9 +2,13 @@ const storageKey = "regulation-search-endpoint";
 const loginKey = "regulation-search-login";
 const historyKey = "regulation-search-history";
 const modelKey = "regulation-search-chat-model";
+const responseLengthKey = "regulation-search-response-length";
 const defaultEndpoint = "./regulation-proxy/search.php";
 const defaultChatModel = "openai/gpt-4o-mini";
 const allowedChatModels = ["openai/gpt-4o-mini", "openai/gpt-oss-120b"];
+const fixedAnswerTemperature = 0.1;
+const defaultResponseLength = "M";
+const allowedResponseLengths = ["S", "M", "L"];
 const authEndpoint = "./regulation-proxy/auth.php";
 const uploadEndpoint = "./regulation-proxy/upload.php";
 const collectionEndpoint = "./regulation-proxy/collection.php";
@@ -37,6 +41,8 @@ const searchForm = document.querySelector("#search-form");
 const queryInput = document.querySelector("#query");
 const limitInput = document.querySelector("#limit");
 const chatModelInput = document.querySelector("#chat-model");
+const temperatureInput = document.querySelector("#answer-temperature");
+const responseLengthInput = document.querySelector("#response-length");
 const submitButton = document.querySelector("#submit");
 const charCount = document.querySelector("#char-count");
 
@@ -108,8 +114,29 @@ function loadChatModel() {
   chatModelInput.value = allowedChatModels.includes(saved) ? saved : defaultChatModel;
 }
 
+function loadAnswerTemperature() {
+  if (!temperatureInput) {
+    return;
+  }
+
+  temperatureInput.value = fixedAnswerTemperature.toFixed(1);
+}
+
+function loadResponseLength() {
+  if (!responseLengthInput) {
+    return;
+  }
+
+  const saved = String(localStorage.getItem(responseLengthKey) || defaultResponseLength).trim().toUpperCase();
+  responseLengthInput.value = allowedResponseLengths.includes(saved) ? saved : defaultResponseLength;
+}
+
 function saveChatModel() {
   localStorage.setItem(modelKey, getChatModel());
+}
+
+function saveResponseLength() {
+  localStorage.setItem(responseLengthKey, getResponseLength());
 }
 
 function rememberLogin(login) {
@@ -151,6 +178,15 @@ function getChatModel() {
 
   const value = String(chatModelInput.value || "").trim();
   return allowedChatModels.includes(value) ? value : defaultChatModel;
+}
+
+function getResponseLength() {
+  if (!responseLengthInput) {
+    return defaultResponseLength;
+  }
+
+  const value = String(responseLengthInput.value || "").trim().toUpperCase();
+  return allowedResponseLengths.includes(value) ? value : defaultResponseLength;
 }
 
 function saveEndpoint() {
@@ -653,7 +689,7 @@ async function connectWithCredentials(login, password) {
   return parseJsonResponse(response, "Auth API вернул не-JSON ответ");
 }
 
-async function callSearchApi({ endpoint, query, limit, model }) {
+async function callSearchApi({ endpoint, query, limit, model, responseLength }) {
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -664,7 +700,9 @@ async function callSearchApi({ endpoint, query, limit, model }) {
       top_k: limit,
       generate_answer: true,
       preset: "balanced",
-      model
+      model,
+      temperature: fixedAnswerTemperature,
+      response_length: responseLength
     })
   });
 
@@ -816,6 +854,7 @@ async function handleSearch(event) {
   const query = String(queryInput?.value || "").trim();
   const limit = Number(limitInput?.value || 6);
   const model = getChatModel();
+  const responseLength = getResponseLength();
 
   if (!endpoint) {
     setState("Сначала укажите URL search proxy в настройках подключения.", "error");
@@ -838,6 +877,7 @@ async function handleSearch(event) {
   }
 
   saveChatModel();
+  saveResponseLength();
 
   submitButton.disabled = true;
   resetFeedbackState();
@@ -851,7 +891,8 @@ async function handleSearch(event) {
       endpoint,
       query,
       limit: Math.max(1, Math.min(12, Math.round(limit || 6))),
-      model
+      model,
+      responseLength
     });
     saveHistoryQuery(query);
     renderHistory();
@@ -884,7 +925,8 @@ async function testEndpoint() {
       endpoint,
       query: "правила оформления командировки",
       limit: 2,
-      model: getChatModel()
+      model: getChatModel(),
+      responseLength: getResponseLength()
     });
     const count = Array.isArray(payload.fragments)
       ? payload.fragments.length
@@ -1125,6 +1167,8 @@ async function startIndexing() {
 loadEndpoint();
 loadStoredLogin();
 loadChatModel();
+loadAnswerTemperature();
+loadResponseLength();
 renderHistory();
 updateCharCount();
 setActiveView("search");
@@ -1141,6 +1185,7 @@ saveEndpointButton?.addEventListener("click", saveEndpoint);
 testEndpointButton?.addEventListener("click", testEndpoint);
 queryInput?.addEventListener("input", updateCharCount);
 chatModelInput?.addEventListener("change", saveChatModel);
+responseLengthInput?.addEventListener("change", saveResponseLength);
 feedbackYes?.addEventListener("click", () => submitFeedback("yes"));
 feedbackNo?.addEventListener("click", () => submitFeedback("no"));
 clearFilesButton?.addEventListener("click", () => {

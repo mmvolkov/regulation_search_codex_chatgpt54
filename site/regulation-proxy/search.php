@@ -38,6 +38,11 @@ if ($preset === '') {
     $preset = 'balanced';
 }
 $model = trim((string) ($payload['model'] ?? ''));
+$responseLength = strtoupper(trim((string) ($payload['response_length'] ?? 'M')));
+if (!in_array($responseLength, ['S', 'M', 'L'], true)) {
+    $responseLength = 'M';
+}
+$temperature = 0.1;
 
 $dispatcherBody = [
     'action' => 'search',
@@ -48,6 +53,8 @@ $dispatcherBody = [
     'top_k' => $topK,
     'generate_answer' => $generateAnswer,
     'preset' => $preset,
+    'temperature' => $temperature,
+    'response_length' => $responseLength,
 ];
 if ($model !== '') {
     $dispatcherBody['model'] = $model;
@@ -63,6 +70,8 @@ $fallbackBody = [
     'top_k' => $topK,
     'generate_answer' => $generateAnswer,
     'preset' => $preset,
+    'temperature' => $temperature,
+    'response_length' => $responseLength,
 ];
 if ($model !== '') {
     $fallbackBody['model'] = $model;

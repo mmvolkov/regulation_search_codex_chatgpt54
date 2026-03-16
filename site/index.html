@@ -109,6 +109,25 @@
                         <option value="openai/gpt-oss-120b">GPT OSS 120B (эксперимент)</option>
                       </select>
                     </label>
+
+                    <label class="meta-control meta-control--stack">
+                      <span>Температура ответов</span>
+                      <input id="answer-temperature" type="text" value="0.1" readonly />
+                    </label>
+
+                    <label class="meta-control meta-control--stack">
+                      <span>Полнота ответа</span>
+                      <select id="response-length" class="meta-control__select">
+                        <option value="S">S — кратко</option>
+                        <option value="M" selected>M — стандартно</option>
+                        <option value="L">L — развернуто</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div class="search-form__settings-note">
+                    <p class="search-form__hint">Температура генерации установлена на 0.1.</p>
+                    <p class="search-form__hint">S — кратко, M — стандартно, L — развернуто.</p>
                   </div>
 
                   <div class="search-form__row">
