@@ -130,6 +130,7 @@ class SearchResult(BaseModel):
 class SearchResponse(BaseModel):
     query: str
     answer: str | None = None
+    answer_found: bool = True
     fragments: list[SearchResult]
     total_fragments: int
     chat_model: str | None = None
@@ -204,8 +205,8 @@ SYSTEM_PROMPT_BASE = """Ты — помощник для сотрудников 
 
 Правила:
 1. Отвечай ТОЛЬКО на основе предоставленного контекста.
-2. Если нет информации — скажи об этом.
-3. Указывай название документа, если есть ответ на вопрос.
+2. Если в контексте нет информации для ответа — скажи об этом, не указывай источник и не упоминай документы.
+3. Указывай название документа только если ты нашёл ответ на вопрос.
 4. Отвечай на русском языке.
 5. Будь точен и конкретен, не додумывай."""
 
@@ -309,6 +310,24 @@ async def generate_answer(
     except Exception as e:
         logger.error("Answer generation failed: %s", e)
         return None
+
+
+_FALLBACK_PATTERNS = [
+    "нет информации",
+    "в контексте нет",
+    "в предоставленном контексте нет",
+    "не найдена информация",
+    "не удалось найти",
+    "к сожалению",
+]
+
+
+def is_fallback_answer(text: str | None) -> bool:
+    """Return True if LLM answer indicates no information was found."""
+    if not text:
+        return True
+    lower = text.strip().lower()
+    return any(p in lower for p in _FALLBACK_PATTERNS)
 
 
 # --- Endpoints ---
@@ -430,6 +449,7 @@ async def search(request: SearchRequest):
                 "Ваш вопрос не относится к регламентам компании. "
                 "Пожалуйста, задайте вопрос, связанный с рабочими процессами."
             ),
+            answer_found=False,
             fragments=[],
             total_fragments=0,
             chat_model=chat_model,
@@ -445,6 +465,7 @@ async def search(request: SearchRequest):
         return SearchResponse(
             query=query,
             answer="К сожалению, по вашему запросу ничего не найдено.",
+            answer_found=False,
             fragments=[],
             total_fragments=0,
             chat_model=chat_model,
@@ -477,6 +498,7 @@ async def search(request: SearchRequest):
     return SearchResponse(
         query=query,
         answer=answer,
+        answer_found=not is_fallback_answer(answer),
         fragments=fragments,
         total_fragments=len(fragments),
         chat_model=chat_model,
