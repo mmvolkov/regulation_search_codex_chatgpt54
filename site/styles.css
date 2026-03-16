@@ -153,6 +153,16 @@ a {
   height: 8px;
 }
 
+.brand-lockup__tech {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
 .secondary-button,
 .feedback-button,
 .history-item,
@@ -610,6 +620,28 @@ a {
   font-family: "Manrope", sans-serif;
   font-size: 1rem;
   font-weight: 800;
+}
+
+.answer-line--markdown p {
+  margin: 0 0 0.6em;
+}
+
+.answer-line--markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.answer-line--markdown ul,
+.answer-line--markdown ol {
+  margin: 0.4em 0 0.8em;
+  padding-left: 1.4em;
+}
+
+.answer-line--markdown li {
+  margin-bottom: 0.25em;
+}
+
+.answer-line--markdown em {
+  font-style: italic;
 }
 
 .answer-divider {

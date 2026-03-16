@@ -330,6 +330,49 @@ function normalizeAnswerText(text) {
   return String(text).replace(/^\s*ответ:\s*/i, "").trim() || "Текст ответа отсутствует.";
 }
 
+function renderMarkdown(text) {
+  let html = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
+
+  const lines = html.split("\n");
+  const result = [];
+  let inList = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const listMatch = trimmed.match(/^[-–•]\s+(.*)/);
+    const numMatch = trimmed.match(/^\d+\.\s+(.*)/);
+
+    if (listMatch || numMatch) {
+      if (!inList) {
+        result.push(listMatch ? "<ul>" : "<ol>");
+        inList = listMatch ? "ul" : "ol";
+      }
+      result.push(`<li>${(listMatch || numMatch)[1]}</li>`);
+    } else {
+      if (inList) {
+        result.push(inList === "ul" ? "</ul>" : "</ol>");
+        inList = false;
+      }
+      if (trimmed === "") {
+        continue;
+      }
+      result.push(`<p>${trimmed}</p>`);
+    }
+  }
+
+  if (inList) {
+    result.push(inList === "ul" ? "</ul>" : "</ol>");
+  }
+
+  return result.join("");
+}
+
 function parseOptionalBoolean(value) {
   if (typeof value === "boolean") {
     return value;
@@ -514,7 +557,7 @@ function renderResults(data) {
   const { normalizedAnswer, answerFound } = resolveAnswerMeta(data, topHit);
 
   if (answerText) {
-    answerText.textContent = normalizedAnswer;
+    answerText.innerHTML = renderMarkdown(normalizedAnswer);
   }
   if (answerSource) {
     answerSource.textContent = answerFound ? [topTitle, topCitation].filter(Boolean).join(" / ") : "";
