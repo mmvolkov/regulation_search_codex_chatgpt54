@@ -54,6 +54,8 @@ if ($preset === '') {
     $preset = 'balanced';
 }
 
+$model = isset($payload['model']) ? trim((string) $payload['model']) : '';
+
 $requestBody = [
     'action' => 'search',
     'email' => regulation_search_normalize_email($email),
@@ -62,6 +64,10 @@ $requestBody = [
     'generate_answer' => $generateAnswer,
     'preset' => $preset,
 ];
+
+if ($model !== '') {
+    $requestBody['model'] = $model;
+}
 
 $ch = curl_init($upstreamUrl);
 curl_setopt_array($ch, [

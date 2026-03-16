@@ -3,263 +3,409 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Поиск по регламентам</title>
+    <title>Помощник для сотрудников</title>
     <meta
       name="description"
-      content="Поиск по корпоративным регламентам с ответом, источником и загрузкой документов."
+      content="Ответы на вопросы, заданные на естественном языке, на основе содержания корпоративных регламентов"
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260315g" />
+    <link rel="stylesheet" href="./styles.css?v=20260316f" />
   </head>
   <body>
+    <div class="page-ornament page-ornament--left" aria-hidden="true"></div>
+    <div class="page-ornament page-ornament--right" aria-hidden="true"></div>
+
     <div class="app-shell">
-      <header class="mode-switch" aria-label="Режимы">
-        <button
-          class="mode-switch__item mode-switch__item--active"
-          type="button"
-          data-view="search"
-        >
-          Поиск по регламентам
-        </button>
-        <button class="mode-switch__item" type="button" data-view="upload">
-          Загрузка документов
-        </button>
-      </header>
-
-      <main class="page">
-        <div id="search-view" class="view-panel">
-          <section class="search-panel">
-            <h1>Поиск по регламентам</h1>
-            <p class="search-panel__lead">
-              Задайте вопрос — получите ответ с указанием источника
-            </p>
-
-            <form id="search-form" class="search-form">
-              <div class="search-bar">
-                <input
-                  id="query"
-                  class="search-bar__input"
-                  type="text"
-                  maxlength="500"
-                  placeholder="Например: кто не должен согласовывать требования к результатам проекта?"
-                  autocomplete="off"
-                />
-                <button id="submit" class="search-bar__button" type="submit">Найти</button>
-              </div>
-
-              <div class="search-meta">
-                <div class="search-meta__left">
-                  <label class="meta-control">
-                    <span>Лимит</span>
-                    <input id="limit" type="number" min="1" max="12" step="1" value="6" />
-                  </label>
-                </div>
-                <div id="char-count" class="search-meta__right">0 / 500</div>
-              </div>
-            </form>
-
-            <div class="examples">
-              <span class="examples__label">Частые вопросы:</span>
-              <button
-                class="example-pill"
-                type="button"
-                data-query="порядок согласования договоров"
-              >
-                Порядок согласования договоров
-              </button>
-              <button
-                class="example-pill"
-                type="button"
-                data-query="правила оформления командировки"
-              >
-                Правила оформления командировки
-              </button>
-              <button
-                class="example-pill"
-                type="button"
-                data-query="кто не должен согласовывать требования к результатам проекта"
-              >
-                Кто не должен согласовывать требования
-              </button>
-              <button
-                class="example-pill"
-                type="button"
-                data-query="какие заявки в crm будут отклонены"
-              >
-                Какие заявки в CRM отклоняют
-              </button>
-            </div>
-          </section>
-
-          <section class="answer-card">
-            <h2>Ответ</h2>
-
-            <div id="state" class="state state--idle">
-              Введите вопрос по регламентам и нажмите «Найти».
-            </div>
-
-            <div id="answer-content" class="answer-content" hidden>
-              <p id="answer-text" class="answer-line"></p>
-
-              <p class="answer-line">
-                <strong>Источник:</strong>
-                <span id="answer-source"></span>
-              </p>
-
-              <div class="answer-divider"></div>
-
-              <div class="feedback-row">
-                <span>Ответ был полезен?</span>
-                <div class="feedback-row__actions">
-                  <button id="feedback-yes" class="feedback-button" type="button">Да</button>
-                  <button id="feedback-no" class="feedback-button" type="button">Нет</button>
-                </div>
-              </div>
-
-              <p id="feedback-status" class="feedback-status" aria-live="polite"></p>
-            </div>
-          </section>
-
-          <section class="sources-card">
-            <div class="section-title">
-              <h2>Найденные фрагменты</h2>
-              <p id="summary">После поиска здесь появятся подтверждающие фрагменты.</p>
-            </div>
-
-            <div id="results" class="results-list">
-              <div class="results-placeholder">
-                Пока пусто. После поиска здесь появятся цитаты из документов и разделов.
-              </div>
-            </div>
-          </section>
-
-          <section class="history-card">
-            <h2>Последние запросы</h2>
-            <div id="history-list" class="history-list">
-              <div class="history-placeholder">История запросов появится после первых поисков.</div>
-            </div>
-          </section>
+      <header class="topbar">
+        <div class="brand-lockup">
+          <span class="brand-lockup__mark" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+          </span>
+          <div class="brand-lockup__text">
+            <strong>Помощник для сотрудников</strong>
+            <span>Корпоративные регламенты</span>
+          </div>
         </div>
 
-        <section id="upload-view" class="upload-view" hidden>
-          <div class="upload-view__inner">
-            <h1>Загрузка документов</h1>
-            <p class="upload-view__lead">
-              Загрузите регламенты для индексации в базу знаний
-            </p>
+        <nav class="topbar__nav" aria-label="Навигация">
+          <a href="#workspace">Демо</a>
+          <a href="#upload-view">Загрузка</a>
+          <a href="#settings">Подключение</a>
+        </nav>
 
-            <div
-              id="dropzone"
-              class="dropzone"
-              tabindex="0"
-              role="button"
-              aria-label="Загрузка документов"
-            >
-              <input id="file-input" type="file" accept=".docx" multiple hidden />
+        <div class="topbar__actions">
+          <button id="check-access" class="topbar__button topbar__button--ghost" type="button">
+            Проверить доступ
+          </button>
+          <button id="save-email" class="topbar__button topbar__button--primary" type="button">
+            Сохранить e-mail
+          </button>
+        </div>
+      </header>
 
-              <div class="dropzone__icon" aria-hidden="true">📁</div>
-              <p class="dropzone__title">Перетащите файлы сюда или нажмите для выбора</p>
-              <p class="dropzone__hint">DOCX — до 20 МБ каждый</p>
+      <main id="workspace" class="workspace">
+        <section class="workspace-frame">
+          <div class="workspace-frame__header">
+            <div class="workspace-frame__brand">
+              <span class="brand-lockup__mark brand-lockup__mark--small" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+                <span></span>
+                <span></span>
+                <span></span>
+                <span></span>
+                <span></span>
+                <span></span>
+              </span>
+              <div>
+                <strong>Помощник для сотрудников</strong>
+                <span>Ответы по корпоративным регламентам</span>
+              </div>
             </div>
 
-            <p id="upload-status" class="upload-status">
-              Выберите DOCX-файлы, затем нажмите «Индексировать».
-            </p>
+            <label class="identity-card">
+              <span class="identity-card__label">Рабочий e-mail</span>
+              <input
+                id="user-email"
+                class="identity-card__input"
+                type="email"
+                spellcheck="false"
+                placeholder="your.name@company.ru"
+                autocomplete="email"
+              />
+              <span id="access-status" class="endpoint-status">Доступ не проверялся</span>
+            </label>
 
-            <section class="collection-card">
-              <div class="collection-card__head">
-                <div>
-                  <h2>Статус коллекции</h2>
-                  <p class="collection-card__lead">
-                    Сколько фрагментов сейчас хранится в локальном Qdrant.
-                  </p>
+            <div class="mode-switch" aria-label="Режимы">
+              <button
+                class="mode-switch__item mode-switch__item--active"
+                type="button"
+                data-view="search"
+              >
+                Поиск по регламентам
+              </button>
+              <button class="mode-switch__item" type="button" data-view="upload">
+                Загрузка документов
+              </button>
+            </div>
+          </div>
+
+          <div id="search-view" class="view-panel view-panel--search">
+            <aside class="control-rail">
+              <section class="control-card control-card--steps">
+                <button class="step-card step-card--active" type="button">
+                  1. Сформулируйте вопрос
+                </button>
+                <button class="step-card" type="button">2. Используйте готовые примеры</button>
+              </section>
+
+              <section class="control-card control-card--form">
+                <div class="control-card__head">
+                  <div>
+                    <p class="eyebrow">Шаг 1</p>
+                    <h2>Запрос к регламентам</h2>
+                  </div>
+                  <span id="char-count" class="control-card__meta">0 / 500</span>
                 </div>
-                <div class="collection-card__actions">
-                  <button id="refresh-collection" class="secondary-button" type="button">
-                    Обновить
+
+                <form id="search-form" class="search-form">
+                  <label class="search-field">
+                    <span class="search-field__label">Введите вопрос</span>
+                    <textarea
+                      id="query"
+                      class="search-field__input"
+                      maxlength="500"
+                      rows="5"
+                      placeholder="Например: кто не должен согласовывать требования к результатам проекта?"
+                    ></textarea>
+                  </label>
+
+                  <div class="search-form__controls">
+                    <label class="meta-control meta-control--stack">
+                      <span>Лимит</span>
+                      <input id="limit" type="number" min="1" max="12" step="1" value="6" />
+                    </label>
+
+                    <label class="meta-control meta-control--stack">
+                      <span>Модель ответа</span>
+                      <select id="chat-model" class="meta-control__select">
+                        <option value="openai/gpt-4o-mini">GPT-4o mini</option>
+                        <option value="openai/gpt-oss-120b">GPT OSS 120B (эксперимент)</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div class="search-form__row">
+                    <p class="search-form__hint">
+                      GPT OSS 120B может отвечать точнее на сложных вопросах, но обычно работает
+                      медленнее.
+                    </p>
+                    <button id="submit" class="command-button" type="submit">Найти ответ</button>
+                  </div>
+                </form>
+              </section>
+
+              <section class="control-card">
+                <div class="control-card__head">
+                  <div>
+                    <p class="eyebrow">Шаг 2</p>
+                    <h2>Быстрый старт</h2>
+                  </div>
+                </div>
+
+                <div class="examples examples--stack">
+                  <button
+                    class="example-pill"
+                    type="button"
+                    data-query="порядок согласования договоров"
+                  >
+                    Порядок согласования договоров
                   </button>
                   <button
-                    id="clear-collection"
-                    class="secondary-button secondary-button--danger"
+                    class="example-pill"
                     type="button"
+                    data-query="правила оформления командировки"
                   >
-                    Очистить коллекцию
+                    Правила оформления командировки
+                  </button>
+                  <button
+                    class="example-pill"
+                    type="button"
+                    data-query="кто не должен согласовывать требования к результатам проекта"
+                  >
+                    Кто не должен согласовывать требования
+                  </button>
+                  <button
+                    class="example-pill"
+                    type="button"
+                    data-query="какие заявки в crm будут отклонены"
+                  >
+                    Какие заявки в CRM отклоняют
                   </button>
                 </div>
-              </div>
+              </section>
 
-              <div class="collection-metrics">
-                <article class="metric-card">
-                  <span class="metric-card__label">Фрагменты</span>
-                  <strong id="collection-points" class="metric-card__value">-</strong>
-                </article>
-                <article class="metric-card">
-                  <span class="metric-card__label">Статус</span>
-                  <strong id="collection-status" class="metric-card__value">Проверка...</strong>
-                </article>
-                <article class="metric-card">
-                  <span class="metric-card__label">Коллекция</span>
-                  <strong id="collection-name" class="metric-card__value">-</strong>
-                </article>
-              </div>
+              <section class="control-card history-card">
+                <div class="control-card__head">
+                  <div>
+                    <p class="eyebrow">История</p>
+                    <h2>Последние запросы</h2>
+                  </div>
+                </div>
 
-              <p id="collection-note" class="collection-note">
-                Загружаю текущее состояние коллекции...
-              </p>
+                <div id="history-list" class="history-list">
+                  <div class="history-placeholder">История запросов появится после первых поисков.</div>
+                </div>
+              </section>
+            </aside>
+
+            <section class="results-board">
+              <section class="results-hero">
+                <div>
+                  <p class="eyebrow">Регламентный поиск</p>
+                  <h1>Помощник для сотрудников</h1>
+                  <p class="results-hero__lead">
+                    Ответы на вопросы, заданные на естественном языке, на основе содержания
+                    корпоративных регламентов.
+                  </p>
+                </div>
+                <div class="results-hero__badge">RAG + BM25</div>
+              </section>
+
+              <section class="answer-card">
+                <div class="answer-card__head">
+                  <div>
+                    <p class="eyebrow">Ответ системы</p>
+                    <h2>Сводка по вопросу</h2>
+                  </div>
+                </div>
+
+                <div id="state" class="state state--idle">
+                  Введите вопрос по регламентам и нажмите «Найти».
+                </div>
+
+                <div id="answer-content" class="answer-content" hidden>
+                  <p id="answer-text" class="answer-line"></p>
+
+                  <p class="answer-line answer-line--source">
+                    <strong>Источник:</strong>
+                    <span id="answer-source"></span>
+                  </p>
+
+                  <div class="answer-divider"></div>
+
+                  <div class="feedback-row">
+                    <span>Ответ был полезен?</span>
+                    <div class="feedback-row__actions">
+                      <button id="feedback-yes" class="feedback-button" type="button">Да</button>
+                      <button id="feedback-no" class="feedback-button" type="button">Нет</button>
+                    </div>
+                  </div>
+
+                  <p id="feedback-status" class="feedback-status" aria-live="polite"></p>
+                </div>
+              </section>
+
+              <section class="sources-card">
+                <div class="section-title">
+                  <div>
+                    <p class="eyebrow">Результаты</p>
+                    <h2>Подтверждающие фрагменты</h2>
+                  </div>
+                  <p id="summary">После поиска здесь появятся подтверждающие фрагменты.</p>
+                </div>
+
+                <div class="results-table">
+                  <div class="results-table__head">
+                    <span>№</span>
+                    <span>Документ</span>
+                    <span>Тип</span>
+                    <span>Релевантность</span>
+                    <span>Обоснование</span>
+                  </div>
+
+                  <div id="results" class="results-list">
+                    <div class="results-placeholder">
+                      Пока пусто. После поиска здесь появятся цитаты из документов и разделов.
+                    </div>
+                  </div>
+                </div>
+              </section>
             </section>
+          </div>
 
-            <section id="selected-files-card" class="selected-files-card" hidden>
-              <div class="selected-files-card__head">
-                <h2>Выбранные файлы</h2>
-                <div class="selected-files-card__actions">
-                  <button id="start-indexing" class="primary-button" type="button">
+          <section id="upload-view" class="view-panel view-panel--upload" hidden>
+            <aside class="control-rail">
+              <section class="control-card control-card--steps">
+                <button class="step-card step-card--active" type="button">
+                  1. Выберите DOCX-файлы
+                </button>
+                <button class="step-card" type="button">2. Запустите индексацию</button>
+              </section>
+
+              <section class="control-card">
+                <div class="control-card__head">
+                  <div>
+                    <p class="eyebrow">Загрузка</p>
+                    <h2>Новые документы</h2>
+                  </div>
+                </div>
+
+                <div
+                  id="dropzone"
+                  class="dropzone"
+                  tabindex="0"
+                  role="button"
+                  aria-label="Загрузка документов"
+                >
+                  <input id="file-input" type="file" accept=".docx" multiple hidden />
+                  <div class="dropzone__icon" aria-hidden="true">DOCX</div>
+                  <p class="dropzone__title">Перетащите файлы сюда или нажмите для выбора</p>
+                  <p class="dropzone__hint">Поддерживаются DOCX-файлы до 20 МБ каждый</p>
+                </div>
+
+                <p id="upload-status" class="upload-status">
+                  Выберите DOCX-файлы, затем нажмите «Индексировать».
+                </p>
+
+                <div class="upload-rail__actions">
+                  <button id="start-indexing" class="command-button" type="button">
                     Индексировать
                   </button>
                   <button id="clear-files" class="secondary-button" type="button">
                     Очистить список
                   </button>
                 </div>
-              </div>
-              <div id="file-list" class="file-list"></div>
+              </section>
+
+              <section id="selected-files-card" class="control-card selected-files-card" hidden>
+                <div class="control-card__head">
+                  <div>
+                    <p class="eyebrow">Очередь</p>
+                    <h2>Выбранные файлы</h2>
+                  </div>
+                </div>
+                <div id="file-list" class="file-list"></div>
+              </section>
+            </aside>
+
+            <section class="results-board">
+              <section class="results-hero">
+                <div>
+                  <p class="eyebrow">Indexing Workspace</p>
+                  <h1>Загрузка документов</h1>
+                  <p class="results-hero__lead">
+                    Загружайте регламенты, отслеживайте состояние коллекции и поддерживайте
+                    поисковый контур в актуальном состоянии.
+                  </p>
+                </div>
+                <div class="results-hero__badge">Qdrant Collection</div>
+              </section>
+
+              <section class="collection-card">
+                <div class="collection-card__head">
+                  <div>
+                    <p class="eyebrow">Статус коллекции</p>
+                    <h2>Текущее состояние индекса</h2>
+                    <p class="collection-card__lead">
+                      Сколько фрагментов уже доступно для поиска и в каком состоянии находится
+                      коллекция.
+                    </p>
+                  </div>
+
+                  <div class="collection-card__actions">
+                    <button id="refresh-collection" class="secondary-button" type="button">
+                      Обновить
+                    </button>
+                    <button
+                      id="clear-collection"
+                      class="secondary-button secondary-button--danger"
+                      type="button"
+                    >
+                      Очистить коллекцию
+                    </button>
+                  </div>
+                </div>
+
+                <div class="collection-metrics">
+                  <article class="metric-card">
+                    <span class="metric-card__label">Фрагменты</span>
+                    <strong id="collection-points" class="metric-card__value">-</strong>
+                  </article>
+                  <article class="metric-card">
+                    <span class="metric-card__label">Статус</span>
+                    <strong id="collection-status" class="metric-card__value">Проверка...</strong>
+                  </article>
+                  <article class="metric-card">
+                    <span class="metric-card__label">Коллекция</span>
+                    <strong id="collection-name" class="metric-card__value">-</strong>
+                  </article>
+                </div>
+
+                <p id="collection-note" class="collection-note">
+                  Загружаю текущее состояние коллекции...
+                </p>
+              </section>
             </section>
-          </div>
+          </section>
         </section>
 
-        <details class="settings-card">
-          <summary>Доступ и подключение</summary>
-
-          <div class="settings-grid">
-            <label class="field">
-              <span>Рабочий e-mail</span>
-              <input
-                id="user-email"
-                type="email"
-                spellcheck="false"
-                placeholder="name@company.ru"
-                autocomplete="email"
-              />
-            </label>
-
-            <div class="settings-actions">
-              <button id="save-email" class="secondary-button" type="button">
-                Сохранить e-mail
-              </button>
-              <button id="check-access" class="secondary-button" type="button">
-                Проверить доступ
-              </button>
-            </div>
-          </div>
-
-          <p class="settings-help">
-            Временная схема доступа: фронт передаёт рабочий e-mail в локальный PHP proxy,
-            а сайт проверяет его по серверному allowlist.
-          </p>
-          <p id="access-status" class="endpoint-status">Доступ не проверялся</p>
+        <details id="settings" class="settings-card">
+          <summary>Расширенные настройки подключения</summary>
 
           <div class="settings-grid">
             <label class="field">
@@ -285,7 +431,7 @@
 
           <p class="settings-help">
             По умолчанию используется локальный proxy на этом же сайте, который ходит в
-            `search-api` и обходит CORS.
+            dispatcher и `search-api`.
           </p>
           <p id="endpoint-status" class="endpoint-status">URL не проверялся</p>
         </details>
@@ -294,13 +440,22 @@
 
     <template id="result-template">
       <article class="result-item">
-        <div class="result-item__head">
+        <div class="result-item__cell result-item__cell--rank">
           <span class="result-item__rank"></span>
+        </div>
+        <div class="result-item__cell result-item__cell--document">
+          <h3 class="result-item__title"></h3>
+          <p class="result-item__citation"></p>
+        </div>
+        <div class="result-item__cell result-item__cell--type">
+          <span class="result-item__type"></span>
+        </div>
+        <div class="result-item__cell result-item__cell--score">
           <span class="result-item__score"></span>
         </div>
-        <h3 class="result-item__title"></h3>
-        <p class="result-item__citation"></p>
-        <p class="result-item__text"></p>
+        <div class="result-item__cell result-item__cell--text">
+          <p class="result-item__text"></p>
+        </div>
       </article>
     </template>
 
@@ -317,6 +472,6 @@
       </article>
     </template>
 
-    <script src="./app.js?v=20260316a"></script>
+    <script src="./app.js?v=20260316f"></script>
   </body>
 </html>

@@ -1,7 +1,10 @@
 const storageKey = "regulation-search-endpoint";
 const emailKey = "regulation-search-email";
 const historyKey = "regulation-search-history";
+const modelKey = "regulation-search-chat-model";
 const defaultEndpoint = "./regulation-proxy/search.php";
+const defaultChatModel = "openai/gpt-4o-mini";
+const allowedChatModels = ["openai/gpt-4o-mini", "openai/gpt-oss-120b"];
 const authEndpoint = "./regulation-proxy/auth.php";
 const uploadEndpoint = "./regulation-proxy/upload.php";
 const collectionEndpoint = "./regulation-proxy/collection.php";
@@ -26,6 +29,7 @@ const endpointStatus = document.querySelector("#endpoint-status");
 const searchForm = document.querySelector("#search-form");
 const queryInput = document.querySelector("#query");
 const limitInput = document.querySelector("#limit");
+const chatModelInput = document.querySelector("#chat-model");
 const submitButton = document.querySelector("#submit");
 const charCount = document.querySelector("#char-count");
 
@@ -82,8 +86,26 @@ function loadUserEmail() {
   }
 }
 
+function loadChatModel() {
+  if (!chatModelInput) {
+    return;
+  }
+
+  const saved = localStorage.getItem(modelKey) || defaultChatModel;
+  chatModelInput.value = allowedChatModels.includes(saved) ? saved : defaultChatModel;
+}
+
 function getUserEmail() {
   return emailInput.value.trim().toLowerCase();
+}
+
+function getChatModel() {
+  if (!chatModelInput) {
+    return defaultChatModel;
+  }
+
+  const value = String(chatModelInput.value || "").trim();
+  return allowedChatModels.includes(value) ? value : defaultChatModel;
 }
 
 function saveUserEmail() {
@@ -95,6 +117,10 @@ function saveUserEmail() {
   localStorage.setItem(emailKey, value);
   setAccessStatus("E-mail сохранён локально в браузере.", "ok");
   return true;
+}
+
+function saveChatModel() {
+  localStorage.setItem(modelKey, getChatModel());
 }
 
 function saveEndpoint() {
@@ -220,6 +246,42 @@ function resolveAnswerMeta(data, topHit) {
   };
 }
 
+function getHitScore(hit) {
+  if (typeof hit.score === "number") {
+    return hit.score;
+  }
+
+  if (typeof hit.rrf_score === "number") {
+    return hit.rrf_score;
+  }
+
+  return null;
+}
+
+function formatScoreLabel(hit, topScore) {
+  const rawScore = getHitScore(hit);
+  if (rawScore === null || topScore === null || topScore <= 0) {
+    return "n/a";
+  }
+
+  const relativeScore = Math.round((rawScore / topScore) * 100);
+  return `${Math.max(8, Math.min(100, relativeScore))}%`;
+}
+
+function formatFragmentType(hit) {
+  const normalized = String(hit.fragment_type || hit.block_type || "").trim().toLowerCase();
+  if (normalized === "table") {
+    return "Таблица";
+  }
+  if (normalized === "text") {
+    return "Текст";
+  }
+  if (normalized) {
+    return normalized;
+  }
+  return "Фрагмент";
+}
+
 function updateCharCount() {
   charCount.textContent = `${queryInput.value.length} / 500`;
 }
@@ -302,6 +364,7 @@ function renderResults(data) {
   }
 
   const topHit = fragments[0];
+  const topScore = getHitScore(topHit);
   const topTitle = topHit.doc_title || topHit.doc_name || "Источник не указан";
   const topCitation = topHit.citation || topHit.heading || topHit.fragment_type || "";
   const { normalizedAnswer, answerFound } = resolveAnswerMeta(data, topHit);
@@ -328,24 +391,20 @@ function renderResults(data) {
 
   for (const [index, hit] of fragments.entries()) {
     const fragment = resultTemplate.content.cloneNode(true);
-    fragment.querySelector(".result-item__rank").textContent = `Результат ${hit.rank || index + 1}`;
-    fragment.querySelector(".result-item__score").textContent =
-      typeof hit.score === "number"
-        ? hit.score.toFixed(3)
-        : typeof hit.rrf_score === "number"
-          ? hit.rrf_score.toFixed(3)
-          : "n/a";
+    fragment.querySelector(".result-item__rank").textContent = String(hit.rank || index + 1);
     fragment.querySelector(".result-item__title").textContent =
       hit.doc_title || hit.doc_name || "Документ без названия";
     fragment.querySelector(".result-item__citation").textContent =
       hit.citation || hit.heading || hit.fragment_type || "Цитата не указана";
+    fragment.querySelector(".result-item__type").textContent = formatFragmentType(hit);
+    fragment.querySelector(".result-item__score").textContent = formatScoreLabel(hit, topScore);
     fragment.querySelector(".result-item__text").textContent =
       hit.raw_text || hit.text || "Текст фрагмента отсутствует";
     resultsNode.append(fragment);
   }
 }
 
-async function callSearchApi({ endpoint, query, limit }) {
+async function callSearchApi({ endpoint, query, limit, model }) {
   const email = getUserEmail();
   const normalizedEndpoint = endpoint.trim();
   const isDispatcherEndpoint = /regulation-search-dispatch|\/webhook\//i.test(normalizedEndpoint);
@@ -354,7 +413,8 @@ async function callSearchApi({ endpoint, query, limit }) {
     query,
     top_k: limit,
     generate_answer: true,
-    preset: "balanced"
+    preset: "balanced",
+    model
   };
 
   if (isDispatcherEndpoint) {
@@ -590,6 +650,7 @@ async function handleSearch(event) {
   const email = getUserEmail();
   const query = queryInput.value.trim();
   const limit = Number(limitInput.value || 6);
+  const model = getChatModel();
 
   if (!endpoint) {
     setState("Сначала укажите URL search proxy в настройках подключения.", "error");
@@ -610,6 +671,8 @@ async function handleSearch(event) {
     return;
   }
 
+  saveChatModel();
+
   submitButton.disabled = true;
   resetFeedbackState();
   lastSearchContext = null;
@@ -617,7 +680,7 @@ async function handleSearch(event) {
   summaryNode.textContent = "Идёт поиск по документам.";
 
   try {
-    const payload = await callSearchApi({ endpoint, query, limit });
+    const payload = await callSearchApi({ endpoint, query, limit, model });
     saveHistoryQuery(query);
     renderHistory();
     renderResults(payload);
@@ -648,7 +711,8 @@ async function testEndpoint() {
     const payload = await callSearchApi({
       endpoint,
       query: "правила оформления командировки",
-      limit: 2
+      limit: 2,
+      model: getChatModel()
     });
     const count = Array.isArray(payload.fragments)
       ? payload.fragments.length
@@ -850,6 +914,7 @@ async function startIndexing() {
 
 loadEndpoint();
 loadUserEmail();
+loadChatModel();
 renderHistory();
 updateCharCount();
 setActiveView("search");
@@ -880,6 +945,9 @@ checkAccessButton.addEventListener("click", async () => {
 saveEndpointButton.addEventListener("click", saveEndpoint);
 testEndpointButton.addEventListener("click", testEndpoint);
 queryInput.addEventListener("input", updateCharCount);
+if (chatModelInput) {
+  chatModelInput.addEventListener("change", saveChatModel);
+}
 feedbackYes.addEventListener("click", () => submitFeedback("yes"));
 feedbackNo.addEventListener("click", () => submitFeedback("no"));
 clearFilesButton.addEventListener("click", () => {
