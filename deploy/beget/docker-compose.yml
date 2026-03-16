@@ -168,10 +168,15 @@ services:
   regulation-search-api:
     restart: always
     build:
-      context: ${REGULATION_SEARCH_API_ROOT:-/opt/regulation_search_v2/backend}
+      context: ${PROJECT_ROOT:-/opt/rag/RAG_Regulation_Search_Codex53}
+      dockerfile: deploy/beget/Dockerfile.search-api
     image: regulation-search-api:latest
     env_file:
-      - ${REGULATION_SEARCH_API_ENV_FILE:-/opt/regulation_search_v2/backend/.env}
+      - .env
+    environment:
+      PROJECT_ROOT: ${PROJECT_ROOT:-/opt/rag/RAG_Regulation_Search_Codex53}
+      SEARCH_API_HOST: "0.0.0.0"
+      SEARCH_API_PORT: "8000"
     depends_on:
       - qdrant
     expose:

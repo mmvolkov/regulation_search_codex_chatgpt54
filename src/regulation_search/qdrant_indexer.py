@@ -32,6 +32,19 @@ class IndexStats:
     collection: str
 
 
+@dataclass(slots=True)
+class SearchHit:
+    rank: int
+    score: float
+    doc_title: str | None
+    source_file: str | None
+    block_type: str | None
+    citation: str
+    section_path: list[str]
+    raw_text: str | None
+    text: str | None
+
+
 class RegulationIndexer:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -83,6 +96,60 @@ class RegulationIndexer:
             chunks=len(chunks),
             collection=self.settings.qdrant_collection,
         )
+
+    def search(self, query: str, top_k: int = 6) -> list[SearchHit]:
+        dense_vector = self._dense_embeddings([query])[0]
+        sparse_vectors = list(self.sparse_model.embed([query]))
+        sparse_vector = sparse_vectors[0]
+
+        prefetch_limit = max(top_k * 4, 20)
+        result = self.qdrant.query_points(
+            collection_name=self.settings.qdrant_collection,
+            prefetch=[
+                models.Prefetch(
+                    using=self.settings.dense_vector_name,
+                    query=dense_vector,
+                    limit=prefetch_limit,
+                ),
+                models.Prefetch(
+                    using=self.settings.sparse_vector_name,
+                    query=models.SparseVector(
+                        indices=[int(v) for v in _to_list(sparse_vector.indices)],
+                        values=[float(v) for v in _to_list(sparse_vector.values)],
+                    ),
+                    limit=prefetch_limit,
+                ),
+            ],
+            query=models.FusionQuery(fusion=models.Fusion.RRF),
+            limit=top_k,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        hits: list[SearchHit] = []
+        for rank, point in enumerate(result.points, start=1):
+            payload = point.payload or {}
+            section_path = payload.get("section_path", [])
+            if not isinstance(section_path, list):
+                section_path = []
+            doc_title = payload.get("doc_title")
+            citation = payload.get("citation") or " / ".join(
+                filter(None, [doc_title, " > ".join(section_path)])
+            )
+            hits.append(
+                SearchHit(
+                    rank=rank,
+                    score=point.score if point.score is not None else 0.0,
+                    doc_title=doc_title,
+                    source_file=payload.get("source_file"),
+                    block_type=payload.get("block_type"),
+                    citation=citation,
+                    section_path=section_path,
+                    raw_text=payload.get("raw_text"),
+                    text=payload.get("text"),
+                )
+            )
+        return hits
 
     def _dense_embeddings(self, texts: list[str]) -> list[list[float]]:
         response = self.openai.embeddings.create(

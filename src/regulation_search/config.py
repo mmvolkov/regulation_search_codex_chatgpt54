@@ -30,6 +30,8 @@ class Settings:
     openai_answer_model: str
     chunk_max_chars: int
     index_batch_size: int
+    search_api_host: str
+    search_api_port: int
 
     @classmethod
     def from_env(cls, project_root: str | Path | None = None) -> "Settings":
@@ -55,4 +57,6 @@ class Settings:
             openai_answer_model=os.getenv("OPENAI_ANSWER_MODEL", "gpt-5.4"),
             chunk_max_chars=int(os.getenv("CHUNK_MAX_CHARS", "1200")),
             index_batch_size=int(os.getenv("INDEX_BATCH_SIZE", "16")),
+            search_api_host=os.getenv("SEARCH_API_HOST", "0.0.0.0"),
+            search_api_port=int(os.getenv("SEARCH_API_PORT", "8000")),
         )

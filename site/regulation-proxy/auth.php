@@ -1,70 +1,135 @@
 <?php
+declare(strict_types=1);
 
 require __DIR__ . '/access.php';
 
-$upstreamUrl = regulation_search_dispatcher_url();
-
 header('Content-Type: application/json; charset=utf-8');
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    echo json_encode([
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+
+if ($method === 'GET') {
+    $user = regulation_search_current_user();
+    if ($user === null || regulation_search_current_password() === '') {
+        regulation_search_json_response(200, [
+            'ok' => true,
+            'authenticated' => false,
+            'message' => 'Подключение ещё не выполнено.',
+        ]);
+    }
+
+    regulation_search_json_response(200, [
+        'ok' => true,
+        'authenticated' => true,
+        'message' => 'Сессия подключения активна.',
+        'login' => $user['login'],
+        'email' => $user['email'],
+        'role' => $user['role'],
+        'displayName' => $user['displayName'],
+        'permissions' => $user['permissions'],
+    ]);
+}
+
+if ($method === 'DELETE') {
+    regulation_search_clear_session_user();
+    regulation_search_json_response(200, [
+        'ok' => true,
+        'authenticated' => false,
+        'message' => 'Подключение сброшено.',
+    ]);
+}
+
+if ($method !== 'POST') {
+    regulation_search_json_response(405, [
+        'ok' => false,
         'message' => 'Method not allowed',
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
+    ]);
 }
 
 $rawBody = file_get_contents('php://input');
 if ($rawBody === false || $rawBody === '') {
-    http_response_code(400);
-    echo json_encode([
+    regulation_search_json_response(400, [
+        'ok' => false,
         'message' => 'Empty request body',
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
+    ]);
 }
 
 $payload = json_decode($rawBody, true);
 if (!is_array($payload)) {
     regulation_search_json_response(400, [
+        'ok' => false,
         'message' => 'Invalid JSON body',
     ]);
 }
 
-$dispatcherBody = [
-    'action' => 'authorize',
-    'email' => regulation_search_normalize_email(isset($payload['email']) ? (string) $payload['email'] : ''),
-];
+$login = regulation_search_normalize_login((string) ($payload['login'] ?? $payload['email'] ?? ''));
+$password = trim((string) ($payload['password'] ?? ''));
 
-$ch = curl_init($upstreamUrl);
-curl_setopt_array($ch, [
-    CURLOPT_POST => true,
-    CURLOPT_POSTFIELDS => json_encode($dispatcherBody, JSON_UNESCAPED_UNICODE),
-    CURLOPT_HTTPHEADER => regulation_search_forwarded_headers([
-        'Accept: application/json',
-        'Content-Type: application/json',
-    ]),
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_TIMEOUT => 180,
-]);
-
-$responseBody = curl_exec($ch);
-
-if ($responseBody === false) {
-    $error = curl_error($ch);
-    curl_close($ch);
-    regulation_search_json_response(502, [
-        'message' => 'Auth dispatcher request failed',
-        'error' => $error,
+if ($login === '' || $password === '') {
+    regulation_search_json_response(400, [
+        'ok' => false,
+        'error' => 'invalid_credentials',
+        'message' => 'Введите логин и пароль.',
     ]);
 }
 
-$statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-$contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
-curl_close($ch);
+$dispatcherResponse = regulation_search_request_json(regulation_search_dispatcher_url(), [
+    'action' => 'authorize',
+    'login' => $login,
+    'password' => $password,
+    'email' => $login,
+]);
 
-if (is_string($contentType) && $contentType !== '') {
-    header('Content-Type: ' . $contentType);
+if ($dispatcherResponse['ok']) {
+    $dispatcherPayload = json_decode((string) $dispatcherResponse['body'], true);
+    if (is_array($dispatcherPayload) && !empty($dispatcherPayload['ok'])) {
+        $user = regulation_search_store_session_user([
+            'login' => $dispatcherPayload['login'] ?? $login,
+            'email' => $dispatcherPayload['email'] ?? $login,
+            'role' => $dispatcherPayload['role'] ?? 'viewer',
+            'displayName' => $dispatcherPayload['displayName'] ?? $dispatcherPayload['display_name'] ?? $login,
+            'permissions' => $dispatcherPayload['permissions'] ?? [],
+        ], $password);
+
+        regulation_search_json_response(200, [
+            'ok' => true,
+            'authenticated' => true,
+            'message' => $dispatcherPayload['message'] ?? 'Доступ подтверждён.',
+            'login' => $user['login'],
+            'email' => $user['email'],
+            'role' => $user['role'],
+            'displayName' => $user['displayName'],
+            'permissions' => $user['permissions'],
+        ]);
+    }
 }
 
-http_response_code($statusCode > 0 ? $statusCode : 200);
-echo $responseBody;
+try {
+    $user = regulation_search_authenticate_locally($login, $password);
+} catch (RuntimeException $exception) {
+    regulation_search_json_response(502, [
+        'ok' => false,
+        'error' => 'auth_source_unavailable',
+        'message' => $exception->getMessage(),
+    ]);
+}
+
+if ($user === null) {
+    regulation_search_json_response(403, [
+        'ok' => false,
+        'error' => 'forbidden',
+        'message' => 'Логин или пароль не совпадают с таблицей доступа.',
+    ]);
+}
+
+$storedUser = regulation_search_store_session_user($user, $password);
+
+regulation_search_json_response(200, [
+    'ok' => true,
+    'authenticated' => true,
+    'message' => 'Доступ подтверждён.',
+    'login' => $storedUser['login'],
+    'email' => $storedUser['email'],
+    'role' => $storedUser['role'],
+    'displayName' => $storedUser['displayName'],
+    'permissions' => $storedUser['permissions'],
+]);

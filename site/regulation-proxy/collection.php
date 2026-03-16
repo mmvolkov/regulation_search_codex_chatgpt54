@@ -1,57 +1,55 @@
 <?php
+declare(strict_types=1);
 
 require __DIR__ . '/access.php';
 
-$upstreamUrl = regulation_search_dispatcher_url();
-
 header('Content-Type: application/json; charset=utf-8');
 
-$method = isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET';
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 if ($method !== 'GET' && $method !== 'DELETE') {
-    http_response_code(405);
-    echo json_encode([
+    regulation_search_json_response(405, [
+        'ok' => false,
         'message' => 'Method not allowed',
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
-}
-
-$email = isset($_SERVER['HTTP_X_USER_EMAIL']) ? $_SERVER['HTTP_X_USER_EMAIL'] : '';
-
-$dispatcherBody = [
-    'action' => $method === 'DELETE' ? 'collection_clear' : 'collection_status',
-    'email' => regulation_search_normalize_email($email),
-];
-
-$ch = curl_init($upstreamUrl);
-curl_setopt_array($ch, [
-    CURLOPT_POST => true,
-    CURLOPT_POSTFIELDS => json_encode($dispatcherBody, JSON_UNESCAPED_UNICODE),
-    CURLOPT_HTTPHEADER => regulation_search_forwarded_headers([
-        'Accept: application/json',
-        'Content-Type: application/json',
-    ]),
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_TIMEOUT => 180,
-]);
-
-$responseBody = curl_exec($ch);
-
-if ($responseBody === false) {
-    $error = curl_error($ch);
-    curl_close($ch);
-    regulation_search_json_response(502, [
-        'message' => 'Collection API request failed',
-        'error' => $error,
     ]);
 }
 
-$statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-$contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
-curl_close($ch);
+$user = regulation_search_require_session_user(false, $method === 'DELETE');
 
-if (is_string($contentType) && $contentType !== '') {
-    header('Content-Type: ' . $contentType);
+$dispatcherResponse = regulation_search_request_json(regulation_search_dispatcher_url(), [
+    'action' => $method === 'DELETE' ? 'collection_clear' : 'collection_status',
+    'login' => $user['login'],
+    'password' => regulation_search_current_password(),
+    'email' => $user['email'],
+]);
+if ($dispatcherResponse['ok']) {
+    regulation_search_passthrough_response($dispatcherResponse);
 }
 
-http_response_code($statusCode > 0 ? $statusCode : 200);
-echo $responseBody;
+$fallbackResponse = regulation_search_request_method(
+    regulation_search_search_api_base_url() . '/collection',
+    $method
+);
+
+if (!$fallbackResponse['ok']) {
+    $message = $dispatcherResponse['error'] !== ''
+        ? 'Операция collection через dispatcher не выполнена: ' . $dispatcherResponse['error']
+        : 'Операция collection не выполнена.';
+
+    if ($dispatcherResponse['statusCode'] > 0 && $dispatcherResponse['body'] !== '') {
+        $message = 'Dispatcher вернул HTTP ' . $dispatcherResponse['statusCode'] . '.';
+    }
+
+    if ($fallbackResponse['error'] !== '') {
+        $message .= ' Fallback collection error: ' . $fallbackResponse['error'];
+    } elseif ($fallbackResponse['statusCode'] > 0) {
+        $message .= ' Fallback collection HTTP ' . $fallbackResponse['statusCode'] . '.';
+    }
+
+    regulation_search_json_response(502, [
+        'ok' => false,
+        'error' => 'collection_failed',
+        'message' => $message,
+    ]);
+}
+
+regulation_search_passthrough_response($fallbackResponse);
