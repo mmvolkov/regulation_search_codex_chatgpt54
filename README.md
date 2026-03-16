@@ -3,16 +3,17 @@
 Поиск по корпоративным регламентам в формате `docx` с опорой на:
 
 - предметный парсинг сложных Word-документов;
-- индексацию в `Qdrant`;
+- гибридную индексацию в `Qdrant` (dense + sparse);
 - production-фронтенд на Beget;
 - `PHP` proxy для same-origin доступа;
-- `n8n` как orchestration-слой и площадку для workflow.
+- `n8n` dispatcher как центральный маршрутизатор с логированием;
+- логирование всех действий в Google Sheets.
 
 Корпус регламентов и часть production backend живут вне Git и подключаются отдельно.
 
 ## Профили запуска
 
-В репозитории теперь явно разделены два контура:
+В репозитории явно разделены два контура:
 
 - `docker-compose.yml` в корне: локальный dev-контур, который поднимает только `Qdrant`;
 - `deploy/beget/docker-compose.yml`: production-образец для Beget с `Traefik`, `n8n`, `Postgres`, `Redis`, `Qdrant`, `ingest-api` и внешним `regulation-search-api`.
@@ -21,33 +22,55 @@
 
 ## Документы проекта
 
-- Краткое описание: [docs/PROJECT_ONE_PAGER.md](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/docs/PROJECT_ONE_PAGER.md)
-- Подробное техническое описание: [docs/PROJECT_DESCRIPTION.md](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/docs/PROJECT_DESCRIPTION.md)
-- Схема логирования dispatcher: [docs/LOGGING_SCHEMA.md](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/docs/LOGGING_SCHEMA.md)
+- Краткое описание: [docs/PROJECT_ONE_PAGER.md](docs/PROJECT_ONE_PAGER.md)
+- Подробное техническое описание: [docs/PROJECT_DESCRIPTION.md](docs/PROJECT_DESCRIPTION.md)
+- Обследование проекта: [docs/Обследование.md](docs/Обследование.md)
+- Схема логирования dispatcher: [docs/LOGGING_SCHEMA.md](docs/LOGGING_SCHEMA.md)
+- Runbook деплоя логирования: [docs/LOGGING_DEPLOY_RUNBOOK.md](docs/LOGGING_DEPLOY_RUNBOOK.md)
+- Smoke test checklist: [docs/LOGGING_SMOKE_TEST_CHECKLIST.md](docs/LOGGING_SMOKE_TEST_CHECKLIST.md)
 
 ## Структура
 
 ```text
 .
 ├── deploy/
-│   └── beget/
-│       ├── .env.example
-│       ├── docker-compose.yml
-│       ├── Dockerfile.ingest-api
-│       ├── healthcheck.js
-│       ├── init-data.sh
-│       └── README.md
+│   ├── beget/
+│   │   ├── .env.example
+│   │   ├── docker-compose.yml
+│   │   ├── Dockerfile.ingest-api
+│   │   ├── healthcheck.js
+│   │   ├── init-data.sh
+│   │   └── README.md
+│   └── bundles/
 ├── docs/
+│   ├── PROJECT_ONE_PAGER.md
+│   ├── PROJECT_DESCRIPTION.md
+│   ├── Обследование.md
+│   ├── LOGGING_SCHEMA.md
+│   ├── LOGGING_DEPLOY_RUNBOOK.md
+│   └── LOGGING_SMOKE_TEST_CHECKLIST.md
 ├── n8n/
 │   ├── regulation_search_dispatcher.json
 │   └── regulation_search_hybrid.json
 ├── scripts/
+│   ├── parse_documents.py
+│   ├── index_documents.py
+│   └── build_logging_deploy_bundle.sh
 ├── site/
 │   ├── app.js
 │   ├── index.html
+│   ├── index.php
 │   ├── styles.css
+│   ├── .htaccess
 │   └── regulation-proxy/
+│       ├── access.php
+│       ├── auth.php
+│       ├── collection.php
+│       ├── feedback.php
+│       ├── search.php
+│       └── upload.php
 ├── src/regulation_search/
+│   ├── __init__.py
 │   ├── config.py
 │   ├── docx_parser.py
 │   ├── ingest_api.py
@@ -62,33 +85,36 @@
 ### Локальная разработка
 
 - Python-слой парсит `docx`, режет документы на chunks и индексирует их в `Qdrant`;
-- локально через корневой [docker-compose.yml](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/docker-compose.yml) поднимается только `Qdrant`;
-- для индексации используются [scripts/parse_documents.py](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/scripts/parse_documents.py) и [scripts/index_documents.py](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/scripts/index_documents.py).
+- локально через корневой [docker-compose.yml](docker-compose.yml) поднимается только `Qdrant`;
+- для индексации используются [scripts/parse_documents.py](scripts/parse_documents.py) и [scripts/index_documents.py](scripts/index_documents.py).
 
 ### Текущий production-контур
 
 На Beget фактический рабочий поток выглядит так:
 
-`Frontend -> PHP proxy -> search-api -> Qdrant/OpenAI`
+`Frontend -> PHP proxy -> n8n dispatcher -> search-api -> Qdrant/OpenAI`
+
+`n8n` dispatcher является центральной точкой маршрутизации всех запросов:
+
+- принимает webhook на `/webhook/regulation-search-dispatch`;
+- нормализует входящие параметры;
+- проверяет доступ по allowlist в Google Sheets;
+- маршрутизирует по полю `action`: `authorize`, `search`, `upload`, `collection_status`, `collection_clear`, `feedback`;
+- логирует каждое действие в Google Sheets (`auth_log`, `interaction_log`, `feedback_log`, `document_loading_log`).
 
 Дополнительно рядом живут:
 
-- `n8n` и `n8n-worker` для automation / orchestration;
+- `n8n-worker` для фоновых задач;
 - `Traefik` для HTTPS и routing;
 - `Postgres` и `Redis` для `n8n`;
 - `ingest-api` как отдельный ingestion-контур;
 - внешний `regulation-search-api`, который не хранится в этом репозитории целиком.
-
-### Роль `n8n`
-
-`n8n` в проекте не является единственным backend. Сейчас он используется как orchestration-слой и место для workflow, а production search/upload-контур может идти напрямую через `search-api` и `PHP` proxy.
 
 ## Локальный запуск
 
 ### 1. Поднять `Qdrant`
 
 ```bash
-cd /Users/michaelvolkov/projects/regulation_search_codex_chatgpt54
 docker compose up -d
 ```
 
@@ -103,7 +129,7 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-Заполните переменные в [.env.example](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/.env.example), прежде всего `OPENAI_API_KEY`.
+Заполните переменные в [.env.example](.env.example), прежде всего `OPENAI_API_KEY`.
 
 ### 3. Подготовить chunks
 
@@ -121,15 +147,15 @@ PYTHONPATH=src python3 scripts/index_documents.py --recreate
 
 ## Production на Beget
 
-Production-образец вынесен в [deploy/beget/docker-compose.yml](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/deploy/beget/docker-compose.yml).
+Production-образец вынесен в [deploy/beget/docker-compose.yml](deploy/beget/docker-compose.yml).
 
 Сопутствующие файлы:
 
-- [deploy/beget/.env.example](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/deploy/beget/.env.example)
-- [deploy/beget/Dockerfile.ingest-api](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/deploy/beget/Dockerfile.ingest-api)
-- [deploy/beget/healthcheck.js](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/deploy/beget/healthcheck.js)
-- [deploy/beget/init-data.sh](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/deploy/beget/init-data.sh)
-- [deploy/beget/README.md](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/deploy/beget/README.md)
+- [deploy/beget/.env.example](deploy/beget/.env.example)
+- [deploy/beget/Dockerfile.ingest-api](deploy/beget/Dockerfile.ingest-api)
+- [deploy/beget/healthcheck.js](deploy/beget/healthcheck.js)
+- [deploy/beget/init-data.sh](deploy/beget/init-data.sh)
+- [deploy/beget/README.md](deploy/beget/README.md)
 
 Что важно понимать:
 
@@ -141,7 +167,7 @@ Production-образец вынесен в [deploy/beget/docker-compose.yml](/U
 
 В репозитории добавлен минимальный ingestion API на FastAPI:
 
-- [src/regulation_search/ingest_api.py](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/src/regulation_search/ingest_api.py)
+- [src/regulation_search/ingest_api.py](src/regulation_search/ingest_api.py)
 
 Он предназначен для:
 
@@ -160,18 +186,52 @@ Production-образец вынесен в [deploy/beget/docker-compose.yml](/U
 
 В репозитории лежат два основных workflow:
 
-- [n8n/regulation_search_hybrid.json](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/n8n/regulation_search_hybrid.json)
-- [n8n/regulation_search_dispatcher.json](/Users/michaelvolkov/projects/regulation_search_codex_chatgpt54/n8n/regulation_search_dispatcher.json)
+- [n8n/regulation_search_dispatcher.json](n8n/regulation_search_dispatcher.json) — центральный production dispatcher
+- [n8n/regulation_search_hybrid.json](n8n/regulation_search_hybrid.json) — reference-реализация гибридного поиска
 
-Они полезны как:
+### Dispatcher
 
-- reference implementation;
-- экспортируемые workflow для Beget;
-- база для дальнейшей стабилизации dispatcher-контура.
+Dispatcher это главный production workflow. Все PHP proxy направляют запросы на единый webhook, а dispatcher маршрутизирует их по полю `action`:
+
+| Action | Что делает |
+| --- | --- |
+| `authorize` | Проверяет email по allowlist в Google Sheets |
+| `search` | Проксирует поиск в `search-api`, логирует результат |
+| `upload` | Загружает DOCX в backend, логирует индексацию |
+| `collection_status` | Возвращает состояние коллекции |
+| `collection_clear` | Очищает коллекцию (только admin) |
+| `feedback` | Сохраняет оценку полезности ответа |
+
+Все действия логируются в Google Spreadsheet. Подробная схема: [docs/LOGGING_SCHEMA.md](docs/LOGGING_SCHEMA.md).
+
+## Деплой
+
+Для быстрого деплоя обновлений dispatcher и сайта используется bundle builder:
+
+```bash
+./scripts/build_logging_deploy_bundle.sh
+```
+
+Артефакты появятся в `deploy/bundles/`. Подробный runbook: [docs/LOGGING_DEPLOY_RUNBOOK.md](docs/LOGGING_DEPLOY_RUNBOOK.md).
+
+## Frontend
+
+Статический фронтенд в `site/` предоставляет:
+
+- поиск по регламентам с выбором модели генерации (GPT-4o mini / GPT OSS 120B);
+- загрузку документов (drag-and-drop DOCX);
+- оценку полезности ответа (feedback);
+- просмотр статуса коллекции и ее очистку;
+- историю запросов;
+- проверку доступа по allowlist.
+
+PHP proxy в `site/regulation-proxy/` обеспечивают same-origin доступ к `n8n` dispatcher.
 
 ## Что сейчас считается правдой
 
 - корневой compose не равен production compose;
 - production на Beget шире, чем локальный dev-контур;
+- `n8n` dispatcher является центральной точкой маршрутизации всех API-запросов;
 - `search-api` остается внешней частью боевой архитектуры;
-- `n8n` в проекте важен, но не обязан быть единственной точкой входа для production search.
+- все действия логируются в Google Sheets через dispatcher;
+- feedback и ролевой доступ реализованы и работают.
