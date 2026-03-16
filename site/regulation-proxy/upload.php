@@ -1,94 +1,112 @@
 <?php
+declare(strict_types=1);
 
 require __DIR__ . '/access.php';
 
-$upstreamUrl = regulation_search_dispatcher_url();
-
 header('Content-Type: application/json; charset=utf-8');
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    echo json_encode([
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+    regulation_search_json_response(405, [
+        'ok' => false,
         'message' => 'Method not allowed',
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
+    ]);
 }
 
+$user = regulation_search_require_session_user(true, false);
+
 if (!isset($_FILES['file']) || !is_array($_FILES['file'])) {
-    http_response_code(400);
-    echo json_encode([
+    regulation_search_json_response(400, [
+        'ok' => false,
         'message' => 'File is required',
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
+    ]);
 }
 
 $file = $_FILES['file'];
-$fileError = isset($file['error']) ? $file['error'] : UPLOAD_ERR_NO_FILE;
-if ($fileError !== UPLOAD_ERR_OK) {
-    http_response_code(400);
-    echo json_encode([
+if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+    regulation_search_json_response(400, [
+        'ok' => false,
         'message' => 'Uploaded file is invalid',
-        'errorCode' => isset($file['error']) ? $file['error'] : null,
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
+        'errorCode' => $file['error'] ?? null,
+    ]);
 }
 
-$preset = isset($_POST['preset']) ? $_POST['preset'] : 'balanced';
-$fileSizeBytes = isset($file['size']) ? $file['size'] : 0;
-$fileType = !empty($file['type']) ? $file['type'] : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-$fileName = !empty($file['name']) ? $file['name'] : 'document.docx';
+$preset = trim((string) ($_POST['preset'] ?? 'balanced'));
+if ($preset === '') {
+    $preset = 'balanced';
+}
 
-$postFields = [
+$multipartBody = [
     'action' => 'upload',
-    'email' => regulation_search_normalize_email(isset($_POST['email']) ? (string) $_POST['email'] : ''),
+    'login' => $user['login'],
+    'password' => regulation_search_current_password(),
+    'email' => $user['email'],
     'preset' => $preset,
-    'file_size_bytes' => (string) $fileSizeBytes,
-    'mime_type' => (string) $fileType,
+    'file_size_bytes' => (string) ($file['size'] ?? 0),
+    'mime_type' => (string) ($file['type'] ?: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
     'file_sha1' => sha1_file($file['tmp_name']) ?: '',
     'file' => new CURLFile(
         $file['tmp_name'],
-        $fileType,
-        $fileName
+        $file['type'] ?: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        $file['name'] ?: 'document.docx'
     ),
 ];
 
 if (isset($_POST['min_chunk_chars']) && $_POST['min_chunk_chars'] !== '') {
-    $postFields['min_chunk_chars'] = (string) $_POST['min_chunk_chars'];
+    $multipartBody['min_chunk_chars'] = (string) $_POST['min_chunk_chars'];
 }
 
 if (isset($_POST['max_chunk_chars']) && $_POST['max_chunk_chars'] !== '') {
-    $postFields['max_chunk_chars'] = (string) $_POST['max_chunk_chars'];
+    $multipartBody['max_chunk_chars'] = (string) $_POST['max_chunk_chars'];
 }
 
-$ch = curl_init($upstreamUrl);
-curl_setopt_array($ch, [
-    CURLOPT_POST => true,
-    CURLOPT_POSTFIELDS => $postFields,
-    CURLOPT_HTTPHEADER => regulation_search_forwarded_headers([
-        'Accept: application/json',
-    ]),
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_TIMEOUT => 600,
-]);
+$dispatcherResponse = regulation_search_request_form(regulation_search_dispatcher_url(), $multipartBody, 600);
+if ($dispatcherResponse['ok']) {
+    regulation_search_passthrough_response($dispatcherResponse);
+}
 
-$responseBody = curl_exec($ch);
+$fallbackBody = [
+    'preset' => $preset,
+    'file' => new CURLFile(
+        $file['tmp_name'],
+        $file['type'] ?: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        $file['name'] ?: 'document.docx'
+    ),
+];
 
-if ($responseBody === false) {
-    $error = curl_error($ch);
-    curl_close($ch);
+if (isset($_POST['min_chunk_chars']) && $_POST['min_chunk_chars'] !== '') {
+    $fallbackBody['min_chunk_chars'] = (string) $_POST['min_chunk_chars'];
+}
+
+if (isset($_POST['max_chunk_chars']) && $_POST['max_chunk_chars'] !== '') {
+    $fallbackBody['max_chunk_chars'] = (string) $_POST['max_chunk_chars'];
+}
+
+$fallbackResponse = regulation_search_request_form(
+    regulation_search_search_api_base_url() . '/upload',
+    $fallbackBody,
+    600
+);
+
+if (!$fallbackResponse['ok']) {
+    $message = $dispatcherResponse['error'] !== ''
+        ? 'Загрузка через dispatcher не выполнена: ' . $dispatcherResponse['error']
+        : 'Загрузка не выполнена.';
+
+    if ($dispatcherResponse['statusCode'] > 0 && $dispatcherResponse['body'] !== '') {
+        $message = 'Dispatcher вернул HTTP ' . $dispatcherResponse['statusCode'] . '.';
+    }
+
+    if ($fallbackResponse['error'] !== '') {
+        $message .= ' Fallback upload error: ' . $fallbackResponse['error'];
+    } elseif ($fallbackResponse['statusCode'] > 0) {
+        $message .= ' Fallback upload HTTP ' . $fallbackResponse['statusCode'] . '.';
+    }
+
     regulation_search_json_response(502, [
-        'message' => 'Upload API request failed',
-        'error' => $error,
+        'ok' => false,
+        'error' => 'upload_failed',
+        'message' => $message,
     ]);
 }
 
-$statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-$contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
-curl_close($ch);
-
-if (is_string($contentType) && $contentType !== '') {
-    header('Content-Type: ' . $contentType);
-}
-
-http_response_code($statusCode > 0 ? $statusCode : 200);
-echo $responseBody;
+regulation_search_passthrough_response($fallbackResponse);

@@ -1,5 +1,5 @@
 const storageKey = "regulation-search-endpoint";
-const emailKey = "regulation-search-email";
+const loginKey = "regulation-search-login";
 const historyKey = "regulation-search-history";
 const modelKey = "regulation-search-chat-model";
 const defaultEndpoint = "./regulation-proxy/search.php";
@@ -18,13 +18,20 @@ const searchView = document.querySelector("#search-view");
 const uploadView = document.querySelector("#upload-view");
 
 const endpointInput = document.querySelector("#endpoint");
-const emailInput = document.querySelector("#user-email");
-const saveEmailButton = document.querySelector("#save-email");
-const checkAccessButton = document.querySelector("#check-access");
-const saveEndpointButton = document.querySelector("#save-endpoint");
-const testEndpointButton = document.querySelector("#test-endpoint");
+const connectButton = document.querySelector("#connect-button");
+const currentLoginNode = document.querySelector("#current-login");
 const accessStatus = document.querySelector("#access-status");
 const endpointStatus = document.querySelector("#endpoint-status");
+const saveEndpointButton = document.querySelector("#save-endpoint");
+const testEndpointButton = document.querySelector("#test-endpoint");
+
+const authModal = document.querySelector("#auth-modal");
+const authForm = document.querySelector("#auth-form");
+const authLoginInput = document.querySelector("#auth-login");
+const authPasswordInput = document.querySelector("#auth-password");
+const authModalStatus = document.querySelector("#auth-modal-status");
+const authSubmitButton = document.querySelector("#auth-submit");
+const authCloseButtons = document.querySelectorAll("[data-auth-close]");
 
 const searchForm = document.querySelector("#search-form");
 const queryInput = document.querySelector("#query");
@@ -64,8 +71,10 @@ const collectionName = document.querySelector("#collection-name");
 const collectionNote = document.querySelector("#collection-note");
 
 let selectedFiles = [];
+let currentUser = null;
 let lastSearchContext = null;
 let lastFeedbackValue = "";
+
 const fallbackAnswerPatterns = [
   /к сожалению/i,
   /не найден[а-я\s]*информац/i,
@@ -75,14 +84,18 @@ const fallbackAnswerPatterns = [
 ];
 
 function loadEndpoint() {
+  if (!endpointInput) {
+    return;
+  }
+
   const saved = localStorage.getItem(storageKey);
   endpointInput.value = saved || defaultEndpoint;
 }
 
-function loadUserEmail() {
-  emailInput.value = localStorage.getItem(emailKey) || "";
-  if (emailInput.value.trim()) {
-    setAccessStatus("E-mail сохранён локально. Доступ ещё не проверен.", "");
+function loadStoredLogin() {
+  const savedLogin = localStorage.getItem(loginKey) || "";
+  if (authLoginInput) {
+    authLoginInput.value = savedLogin;
   }
 }
 
@@ -95,8 +108,40 @@ function loadChatModel() {
   chatModelInput.value = allowedChatModels.includes(saved) ? saved : defaultChatModel;
 }
 
-function getUserEmail() {
-  return emailInput.value.trim().toLowerCase();
+function saveChatModel() {
+  localStorage.setItem(modelKey, getChatModel());
+}
+
+function rememberLogin(login) {
+  localStorage.setItem(loginKey, String(login || "").trim().toLowerCase());
+}
+
+function getStoredLogin() {
+  return String(localStorage.getItem(loginKey) || "").trim().toLowerCase();
+}
+
+function isConnected() {
+  return Boolean(currentUser && currentUser.authenticated !== false && currentUser.login);
+}
+
+function canUpload() {
+  if (!isConnected()) {
+    return false;
+  }
+
+  return Boolean(
+    currentUser?.permissions?.upload ?? currentUser?.canUpload ?? false
+  );
+}
+
+function canManageCollection() {
+  if (!isConnected()) {
+    return false;
+  }
+
+  return Boolean(
+    currentUser?.permissions?.collection_clear ?? currentUser?.canManageCollection ?? false
+  );
 }
 
 function getChatModel() {
@@ -108,23 +153,8 @@ function getChatModel() {
   return allowedChatModels.includes(value) ? value : defaultChatModel;
 }
 
-function saveUserEmail() {
-  const value = getUserEmail();
-  if (!value) {
-    setAccessStatus("Сначала укажите рабочий e-mail.", "error");
-    return false;
-  }
-  localStorage.setItem(emailKey, value);
-  setAccessStatus("E-mail сохранён локально в браузере.", "ok");
-  return true;
-}
-
-function saveChatModel() {
-  localStorage.setItem(modelKey, getChatModel());
-}
-
 function saveEndpoint() {
-  const value = endpointInput.value.trim();
+  const value = String(endpointInput?.value || "").trim();
   if (!value) {
     setEndpointStatus("Сначала укажите URL search proxy.", "error");
     return false;
@@ -136,6 +166,11 @@ function saveEndpoint() {
 }
 
 function setAccessStatus(text, kind = "") {
+  if (!accessStatus) {
+    return;
+  }
+
+  accessStatus.hidden = !text;
   accessStatus.textContent = text;
   accessStatus.className = "endpoint-status";
   if (kind) {
@@ -144,6 +179,10 @@ function setAccessStatus(text, kind = "") {
 }
 
 function setEndpointStatus(text, kind = "") {
+  if (!endpointStatus) {
+    return;
+  }
+
   endpointStatus.textContent = text;
   endpointStatus.className = "endpoint-status";
   if (kind) {
@@ -152,6 +191,10 @@ function setEndpointStatus(text, kind = "") {
 }
 
 function setCollectionNote(text, kind = "") {
+  if (!collectionNote) {
+    return;
+  }
+
   collectionNote.textContent = text;
   collectionNote.className = "collection-note";
   if (kind) {
@@ -159,10 +202,96 @@ function setCollectionNote(text, kind = "") {
   }
 }
 
+function setAuthModalStatus(text, kind = "") {
+  if (!authModalStatus) {
+    return;
+  }
+
+  authModalStatus.hidden = !text;
+  authModalStatus.textContent = text;
+  authModalStatus.className = "endpoint-status";
+  if (kind) {
+    authModalStatus.classList.add(`endpoint-status--${kind}`);
+  }
+}
+
+function setFeedbackStatus(text, kind = "") {
+  if (!feedbackStatus) {
+    return;
+  }
+
+  feedbackStatus.textContent = text;
+  feedbackStatus.className = "feedback-status";
+  if (kind) {
+    feedbackStatus.classList.add(`feedback-status--${kind}`);
+  }
+}
+
+function syncAuthUi() {
+  const displayName = currentUser?.displayName || currentUser?.login || "";
+
+  if (currentLoginNode) {
+    currentLoginNode.textContent = isConnected() ? displayName : "Не подключено";
+  }
+
+  if (connectButton) {
+    connectButton.textContent = isConnected() ? "Сменить пользователя" : "Подключиться";
+  }
+
+  renderSelectedFiles();
+
+  if (clearCollectionButton) {
+    clearCollectionButton.disabled = !canManageCollection();
+  }
+}
+
+function openAuthModal() {
+  if (!authModal) {
+    return;
+  }
+
+  authModal.hidden = false;
+  setAuthModalStatus("");
+
+  if (authLoginInput) {
+    authLoginInput.value = currentUser?.login || getStoredLogin();
+  }
+
+  if (authPasswordInput) {
+    authPasswordInput.value = "";
+  }
+
+  if (authLoginInput && authLoginInput.value) {
+    authPasswordInput?.focus();
+  } else {
+    authLoginInput?.focus();
+  }
+}
+
+function closeAuthModal() {
+  if (!authModal) {
+    return;
+  }
+
+  authModal.hidden = true;
+  setAuthModalStatus("");
+}
+
+function requireConnection(message) {
+  setAccessStatus(message || "Сначала подключитесь по логину и паролю.", "error");
+  openAuthModal();
+  setAuthModalStatus(message || "Введите логин и пароль для продолжения.", "error");
+  return false;
+}
+
 function setActiveView(view) {
   const isSearch = view === "search";
-  searchView.hidden = !isSearch;
-  uploadView.hidden = isSearch;
+  if (searchView) {
+    searchView.hidden = !isSearch;
+  }
+  if (uploadView) {
+    uploadView.hidden = isSearch;
+  }
 
   for (const button of modeButtons) {
     button.classList.toggle("mode-switch__item--active", button.dataset.view === view);
@@ -174,6 +303,10 @@ function setActiveView(view) {
 }
 
 function setState(text, kind = "idle") {
+  if (!stateNode || !answerContent) {
+    return;
+  }
+
   stateNode.hidden = false;
   answerContent.hidden = true;
   stateNode.textContent = text;
@@ -181,6 +314,10 @@ function setState(text, kind = "idle") {
 }
 
 function showAnswer() {
+  if (!stateNode || !answerContent) {
+    return;
+  }
+
   stateNode.hidden = true;
   answerContent.hidden = false;
 }
@@ -189,6 +326,7 @@ function normalizeAnswerText(text) {
   if (!text) {
     return "Текст ответа отсутствует.";
   }
+
   return String(text).replace(/^\s*ответ:\s*/i, "").trim() || "Текст ответа отсутствует.";
 }
 
@@ -221,12 +359,12 @@ function isFallbackAnswerText(text) {
 
 function resolveAnswerMeta(data, topHit) {
   const normalizedAnswer = normalizeAnswerText(
-    data.answer ||
-      topHit.raw_text ||
-      topHit.text
+    data.answer || topHit.raw_text || topHit.text
   );
   const explicitAnswerFound = parseOptionalBoolean(data.answerFound ?? data.answer_found);
-  const responseType = String(data.responseType || data.response_type || "").trim().toLowerCase();
+  const responseType = String(data.responseType || data.response_type || "")
+    .trim()
+    .toLowerCase();
 
   let answerFound = explicitAnswerFound;
   if (answerFound === null) {
@@ -250,11 +388,9 @@ function getHitScore(hit) {
   if (typeof hit.score === "number") {
     return hit.score;
   }
-
   if (typeof hit.rrf_score === "number") {
     return hit.rrf_score;
   }
-
   return null;
 }
 
@@ -269,7 +405,10 @@ function formatScoreLabel(hit, topScore) {
 }
 
 function formatFragmentType(hit) {
-  const normalized = String(hit.fragment_type || hit.block_type || "").trim().toLowerCase();
+  const normalized = String(hit.fragment_type || hit.block_type || "")
+    .trim()
+    .toLowerCase();
+
   if (normalized === "table") {
     return "Таблица";
   }
@@ -279,24 +418,21 @@ function formatFragmentType(hit) {
   if (normalized) {
     return normalized;
   }
+
   return "Фрагмент";
 }
 
 function updateCharCount() {
+  if (!charCount || !queryInput) {
+    return;
+  }
+
   charCount.textContent = `${queryInput.value.length} / 500`;
 }
 
 function setFeedback(active) {
-  feedbackYes.classList.toggle("feedback-button--active", active === "yes");
-  feedbackNo.classList.toggle("feedback-button--active", active === "no");
-}
-
-function setFeedbackStatus(text, kind = "") {
-  feedbackStatus.textContent = text;
-  feedbackStatus.className = "feedback-status";
-  if (kind) {
-    feedbackStatus.classList.add(`feedback-status--${kind}`);
-  }
+  feedbackYes?.classList.toggle("feedback-button--active", active === "yes");
+  feedbackNo?.classList.toggle("feedback-button--active", active === "no");
 }
 
 function resetFeedbackState() {
@@ -321,6 +457,10 @@ function saveHistoryQuery(query) {
 }
 
 function renderHistory() {
+  if (!historyList || !historyTemplate) {
+    return;
+  }
+
   const items = getHistory();
   historyList.innerHTML = "";
 
@@ -345,6 +485,10 @@ function renderHistory() {
 }
 
 function renderResults(data) {
+  if (!resultsNode || !summaryNode || !resultTemplate) {
+    return;
+  }
+
   resultsNode.innerHTML = "";
   resetFeedbackState();
   lastSearchContext = null;
@@ -368,17 +512,24 @@ function renderResults(data) {
   const topTitle = topHit.doc_title || topHit.doc_name || "Источник не указан";
   const topCitation = topHit.citation || topHit.heading || topHit.fragment_type || "";
   const { normalizedAnswer, answerFound } = resolveAnswerMeta(data, topHit);
-  answerText.textContent = normalizedAnswer;
-  answerSource.textContent = answerFound ? [topTitle, topCitation].filter(Boolean).join(" / ") : "";
+
+  if (answerText) {
+    answerText.textContent = normalizedAnswer;
+  }
+  if (answerSource) {
+    answerSource.textContent = answerFound ? [topTitle, topCitation].filter(Boolean).join(" / ") : "";
+  }
   if (answerSourceRow) {
     answerSourceRow.hidden = !answerFound;
   }
+
   showAnswer();
 
   const total = typeof data.total_fragments === "number" ? data.total_fragments : fragments.length;
   summaryNode.textContent = answerFound
     ? `Найдено ${total} фрагментов по запросу «${data.query}».`
     : `Найдено ${total} фрагментов, но прямой ответ по запросу «${data.query}» не найден.`;
+
   lastSearchContext = {
     requestId: data.requestId || data.request_id || "",
     query: data.query || "",
@@ -404,38 +555,14 @@ function renderResults(data) {
   }
 }
 
-async function callSearchApi({ endpoint, query, limit, model }) {
-  const email = getUserEmail();
-  const normalizedEndpoint = endpoint.trim();
-  const isDispatcherEndpoint = /regulation-search-dispatch|\/webhook\//i.test(normalizedEndpoint);
-  const requestBody = {
-    email,
-    query,
-    top_k: limit,
-    generate_answer: true,
-    preset: "balanced",
-    model
-  };
-
-  if (isDispatcherEndpoint) {
-    requestBody.action = "search";
-  }
-
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(requestBody)
-  });
-
+async function parseJsonResponse(response, errorPrefix) {
   const text = await response.text();
-  let payload;
+  let payload = {};
 
   try {
     payload = text ? JSON.parse(text) : {};
   } catch {
-    throw new Error(`Сервис вернул не-JSON ответ: ${text.slice(0, 220)}`);
+    throw new Error(`${errorPrefix}: ${text.slice(0, 220)}`);
   }
 
   if (!response.ok) {
@@ -449,10 +576,53 @@ async function callSearchApi({ endpoint, query, limit, model }) {
   return payload;
 }
 
+async function requestSessionState() {
+  const response = await fetch(authEndpoint, {
+    method: "GET",
+    headers: {
+      Accept: "application/json"
+    }
+  });
+
+  return parseJsonResponse(response, "Auth API вернул не-JSON ответ");
+}
+
+async function connectWithCredentials(login, password) {
+  const response = await fetch(authEndpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      login,
+      password
+    })
+  });
+
+  return parseJsonResponse(response, "Auth API вернул не-JSON ответ");
+}
+
+async function callSearchApi({ endpoint, query, limit, model }) {
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      query,
+      top_k: limit,
+      generate_answer: true,
+      preset: "balanced",
+      model
+    })
+  });
+
+  return parseJsonResponse(response, "Сервис вернул не-JSON ответ");
+}
+
 async function submitFeedback(value) {
-  const email = getUserEmail();
-  if (!email) {
-    setFeedbackStatus("Сначала укажите рабочий e-mail.", "error");
+  if (!isConnected()) {
+    setFeedbackStatus("Сначала подключитесь.", "error");
     return;
   }
 
@@ -476,7 +646,6 @@ async function submitFeedback(value) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        email,
         request_id: lastSearchContext.requestId,
         query: lastSearchContext.query,
         feedback: value,
@@ -487,26 +656,10 @@ async function submitFeedback(value) {
       })
     });
 
-    const text = await response.text();
-    let payload;
-
-    try {
-      payload = text ? JSON.parse(text) : {};
-    } catch {
-      throw new Error(`Feedback API вернул не-JSON ответ: ${text.slice(0, 220)}`);
-    }
-
-    if (!response.ok) {
-      throw new Error(
-        payload?.message ||
-          payload?.error ||
-          `HTTP ${response.status}: ${response.statusText || "ошибка feedback API"}`
-      );
-    }
-
+    const payload = await parseJsonResponse(response, "Feedback API вернул не-JSON ответ");
     lastFeedbackValue = value;
     setFeedback(value);
-    setFeedbackStatus("Оценка сохранена.", "ok");
+    setFeedbackStatus(payload.message || "Оценка сохранена.", "ok");
   } catch (error) {
     setFeedbackStatus(`Не удалось сохранить feedback: ${error.message}`, "error");
   } finally {
@@ -515,141 +668,102 @@ async function submitFeedback(value) {
   }
 }
 
-async function checkAccess() {
-  const email = getUserEmail();
-  if (!email) {
-    setAccessStatus("Сначала укажите рабочий e-mail.", "error");
-    return null;
-  }
-
-  const response = await fetch(authEndpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ email })
-  });
-
-  const text = await response.text();
-  let payload;
-
-  try {
-    payload = text ? JSON.parse(text) : {};
-  } catch {
-    throw new Error(`Auth API вернул не-JSON ответ: ${text.slice(0, 220)}`);
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      payload?.message ||
-        payload?.error ||
-        `HTTP ${response.status}: ${response.statusText || "ошибка авторизации"}`
-    );
-  }
-
-  return payload;
-}
-
 async function uploadSingleFile(file) {
-  const email = getUserEmail();
   const formData = new FormData();
   formData.append("file", file, file.name);
   formData.append("preset", "balanced");
-  formData.append("email", email);
 
   const response = await fetch(uploadEndpoint, {
     method: "POST",
     body: formData
   });
 
-  const text = await response.text();
-  let payload;
-
-  try {
-    payload = text ? JSON.parse(text) : {};
-  } catch {
-    throw new Error(`Сервис загрузки вернул не-JSON ответ: ${text.slice(0, 220)}`);
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      payload?.detail ||
-        payload?.message ||
-        payload?.error ||
-        `HTTP ${response.status}: ${response.statusText || "ошибка загрузки"}`
-    );
-  }
-
-  return payload;
+  return parseJsonResponse(response, "Сервис загрузки вернул не-JSON ответ");
 }
 
 async function fetchCollectionStatus() {
-  const email = getUserEmail();
   const response = await fetch(collectionEndpoint, {
     method: "GET",
     headers: {
-      Accept: "application/json",
-      "X-User-Email": email
+      Accept: "application/json"
     }
   });
 
-  const text = await response.text();
-  let payload;
-
-  try {
-    payload = text ? JSON.parse(text) : {};
-  } catch {
-    throw new Error(`Collection API вернул не-JSON ответ: ${text.slice(0, 220)}`);
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      payload?.message ||
-        payload?.error ||
-        `HTTP ${response.status}: ${response.statusText || "ошибка collection API"}`
-    );
-  }
-
-  return payload;
+  return parseJsonResponse(response, "Collection API вернул не-JSON ответ");
 }
 
 async function clearCollection() {
-  const email = getUserEmail();
   const response = await fetch(collectionEndpoint, {
     method: "DELETE",
     headers: {
-      Accept: "application/json",
-      "X-User-Email": email
+      Accept: "application/json"
     }
   });
 
-  const text = await response.text();
-  let payload;
+  return parseJsonResponse(response, "Collection API вернул не-JSON ответ");
+}
+
+async function restoreSession(silent = false) {
+  try {
+    const payload = await requestSessionState();
+    if (payload.authenticated) {
+      currentUser = payload;
+      rememberLogin(payload.login || payload.email || "");
+      if (!silent) {
+        setAccessStatus(payload.message || "Подключение активно.", "ok");
+      }
+    } else {
+      currentUser = null;
+      if (!silent) {
+        setAccessStatus("", "");
+      }
+    }
+  } catch (error) {
+    currentUser = null;
+    if (!silent) {
+      setAccessStatus(`Не удалось восстановить подключение: ${error.message}`, "error");
+    }
+  }
+
+  syncAuthUi();
+  return currentUser;
+}
+
+async function handleAuthSubmit(event) {
+  event.preventDefault();
+
+  const login = String(authLoginInput?.value || "").trim().toLowerCase();
+  const password = String(authPasswordInput?.value || "").trim();
+
+  if (!login || !password) {
+    setAuthModalStatus("Введите логин и пароль.", "error");
+    return;
+  }
+
+  authSubmitButton.disabled = true;
+  setAuthModalStatus("Проверяю логин и пароль...", "");
 
   try {
-    payload = text ? JSON.parse(text) : {};
-  } catch {
-    throw new Error(`Collection API вернул не-JSON ответ: ${text.slice(0, 220)}`);
+    const payload = await connectWithCredentials(login, password);
+    currentUser = payload;
+    rememberLogin(payload.login || login);
+    syncAuthUi();
+    closeAuthModal();
+    setAccessStatus(payload.message || "Доступ подтверждён.", "ok");
+    await refreshCollectionStatus();
+  } catch (error) {
+    setAuthModalStatus(`Не удалось подключиться: ${error.message}`, "error");
+  } finally {
+    authSubmitButton.disabled = false;
   }
-
-  if (!response.ok) {
-    throw new Error(
-      payload?.message ||
-        payload?.error ||
-        `HTTP ${response.status}: ${response.statusText || "ошибка очистки"}`
-    );
-  }
-
-  return payload;
 }
 
 async function handleSearch(event) {
   event.preventDefault();
 
-  const endpoint = endpointInput.value.trim();
-  const email = getUserEmail();
-  const query = queryInput.value.trim();
-  const limit = Number(limitInput.value || 6);
+  const endpoint = String(endpointInput?.value || "").trim();
+  const query = String(queryInput?.value || "").trim();
+  const limit = Number(limitInput?.value || 6);
   const model = getChatModel();
 
   if (!endpoint) {
@@ -657,8 +771,9 @@ async function handleSearch(event) {
     return;
   }
 
-  if (!email) {
-    setState("Сначала укажите рабочий e-mail и проверьте доступ.", "error");
+  if (!isConnected()) {
+    requireConnection("Сначала подключитесь по логину и паролю.");
+    setState("Сначала подключитесь по логину и паролю.", "error");
     return;
   }
 
@@ -680,7 +795,12 @@ async function handleSearch(event) {
   summaryNode.textContent = "Идёт поиск по документам.";
 
   try {
-    const payload = await callSearchApi({ endpoint, query, limit, model });
+    const payload = await callSearchApi({
+      endpoint,
+      query,
+      limit: Math.max(1, Math.min(12, Math.round(limit || 6))),
+      model
+    });
     saveHistoryQuery(query);
     renderHistory();
     renderResults(payload);
@@ -693,19 +813,19 @@ async function handleSearch(event) {
 }
 
 async function testEndpoint() {
-  const endpoint = endpointInput.value.trim();
+  const endpoint = String(endpointInput?.value || "").trim();
   if (!endpoint) {
     setEndpointStatus("Введите URL перед проверкой.", "error");
     return;
   }
 
-  if (!getUserEmail()) {
-    setEndpointStatus("Сначала укажите рабочий e-mail.", "error");
+  if (!isConnected()) {
+    setEndpointStatus("Сначала подключитесь по логину и паролю.", "error");
     return;
   }
 
   testEndpointButton.disabled = true;
-  setEndpointStatus("Проверяю webhook тестовым запросом...", "");
+  setEndpointStatus("Проверяю API тестовым запросом...", "");
 
   try {
     const payload = await callSearchApi({
@@ -728,11 +848,18 @@ async function testEndpoint() {
 }
 
 async function refreshCollectionStatus() {
-  if (!getUserEmail()) {
+  if (!collectionPoints || !collectionStatus || !collectionName) {
+    return;
+  }
+
+  if (!isConnected()) {
     collectionPoints.textContent = "-";
     collectionStatus.textContent = "Ожидает доступ";
     collectionName.textContent = "-";
-    setCollectionNote("Сначала укажите рабочий e-mail и проверьте доступ.", "");
+    setCollectionNote("Сначала подключитесь по логину и паролю.", "");
+    if (clearCollectionButton) {
+      clearCollectionButton.disabled = true;
+    }
     return;
   }
 
@@ -754,13 +881,19 @@ async function refreshCollectionStatus() {
     setCollectionNote(`Не удалось обновить коллекцию: ${error.message}`, "error");
   } finally {
     refreshCollectionButton.disabled = false;
-    clearCollectionButton.disabled = false;
+    clearCollectionButton.disabled = !canManageCollection();
   }
 }
 
 async function handleClearCollection() {
-  if (!getUserEmail()) {
-    setCollectionNote("Сначала укажите рабочий e-mail и проверьте доступ.", "error");
+  if (!isConnected()) {
+    requireConnection("Сначала подключитесь по логину и паролю.");
+    setCollectionNote("Сначала подключитесь по логину и паролю.", "error");
+    return;
+  }
+
+  if (!canManageCollection()) {
+    setCollectionNote("Очистка коллекции разрешена только администратору.", "error");
     return;
   }
 
@@ -783,7 +916,7 @@ async function handleClearCollection() {
   } catch (error) {
     setCollectionNote(`Не удалось очистить коллекцию: ${error.message}`, "error");
   } finally {
-    clearCollectionButton.disabled = false;
+    clearCollectionButton.disabled = !canManageCollection();
     refreshCollectionButton.disabled = false;
   }
 }
@@ -792,10 +925,15 @@ function formatFileSize(size) {
   if (size >= 1024 * 1024) {
     return `${(size / (1024 * 1024)).toFixed(1)} МБ`;
   }
+
   return `${Math.round(size / 1024)} КБ`;
 }
 
 function renderSelectedFiles() {
+  if (!fileList || !selectedFilesCard || !startIndexingButton) {
+    return;
+  }
+
   fileList.innerHTML = "";
 
   if (selectedFiles.length === 0) {
@@ -805,7 +943,7 @@ function renderSelectedFiles() {
   }
 
   selectedFilesCard.hidden = false;
-  startIndexingButton.disabled = false;
+  startIndexingButton.disabled = !canUpload();
 
   for (const file of selectedFiles) {
     const fragment = fileTemplate.content.cloneNode(true);
@@ -817,6 +955,10 @@ function renderSelectedFiles() {
 }
 
 function setUploadStatus(text, kind = "") {
+  if (!uploadStatus) {
+    return;
+  }
+
   uploadStatus.textContent = text;
   uploadStatus.className = "upload-status";
   if (kind === "error") {
@@ -854,7 +996,20 @@ function handleFiles(files) {
   if (accepted.length > 0) {
     selectedFiles = accepted;
     renderSelectedFiles();
-    setUploadStatus(`Подготовлено файлов для индексации: ${accepted.length}.`, "ok");
+
+    if (!isConnected()) {
+      setUploadStatus(
+        `Файлы подготовлены (${accepted.length}). Для индексации сначала подключитесь.`,
+        ""
+      );
+    } else if (!canUpload()) {
+      setUploadStatus(
+        "Файлы выбраны, но загрузка документов разрешена только редактору или администратору.",
+        "error"
+      );
+    } else {
+      setUploadStatus(`Подготовлено файлов для индексации: ${accepted.length}.`, "ok");
+    }
   }
 
   if (rejected.length > 0 && accepted.length === 0) {
@@ -868,12 +1023,18 @@ function handleFiles(files) {
 }
 
 function openFilePicker() {
-  fileInput.click();
+  fileInput?.click();
 }
 
 async function startIndexing() {
-  if (!getUserEmail()) {
-    setUploadStatus("Сначала укажите рабочий e-mail и проверьте доступ.", "error");
+  if (!isConnected()) {
+    requireConnection("Сначала подключитесь по логину и паролю.");
+    setUploadStatus("Сначала подключитесь по логину и паролю.", "error");
+    return;
+  }
+
+  if (!canUpload()) {
+    setUploadStatus("Загрузка документов разрешена только редактору или администратору.", "error");
     return;
   }
 
@@ -890,10 +1051,7 @@ async function startIndexing() {
 
   try {
     for (const [index, file] of selectedFiles.entries()) {
-      setUploadStatus(
-        `Индексация ${index + 1} из ${selectedFiles.length}: ${file.name}`,
-        ""
-      );
+      setUploadStatus(`Индексация ${index + 1} из ${selectedFiles.length}: ${file.name}`, "");
       const payload = await uploadSingleFile(file);
       const fragmentsCount = payload?.stats?.total_fragments ?? payload?.stats?.vectors_indexed ?? 0;
       results.push(`${payload.doc_name || file.name}: ${fragmentsCount} фрагментов`);
@@ -906,58 +1064,41 @@ async function startIndexing() {
   } catch (error) {
     setUploadStatus(`Индексация не выполнена: ${error.message}`, "error");
   } finally {
-    startIndexingButton.disabled = selectedFiles.length === 0;
+    startIndexingButton.disabled = selectedFiles.length === 0 || !canUpload();
     clearFilesButton.disabled = false;
     dropzone.removeAttribute("aria-disabled");
   }
 }
 
 loadEndpoint();
-loadUserEmail();
+loadStoredLogin();
 loadChatModel();
 renderHistory();
 updateCharCount();
 setActiveView("search");
+setAccessStatus("");
+syncAuthUi();
 
-searchForm.addEventListener("submit", handleSearch);
-saveEmailButton.addEventListener("click", saveUserEmail);
-checkAccessButton.addEventListener("click", async () => {
-  if (!saveUserEmail()) {
-    return;
-  }
-
-  checkAccessButton.disabled = true;
-  setAccessStatus("Проверяю allowlist в n8n...", "");
-
-  try {
-    const payload = await checkAccess();
-    const roleLabel = payload.role ? ` Роль: ${payload.role}.` : "";
-    setAccessStatus(`${payload.message || "Доступ подтверждён."}${roleLabel}`, "ok");
-    if (uploadView.hidden === false) {
-      await refreshCollectionStatus();
-    }
-  } catch (error) {
-    setAccessStatus(`Доступ не подтверждён: ${error.message}`, "error");
-  } finally {
-    checkAccessButton.disabled = false;
-  }
+searchForm?.addEventListener("submit", handleSearch);
+connectButton?.addEventListener("click", () => {
+  setAccessStatus("");
+  openAuthModal();
 });
-saveEndpointButton.addEventListener("click", saveEndpoint);
-testEndpointButton.addEventListener("click", testEndpoint);
-queryInput.addEventListener("input", updateCharCount);
-if (chatModelInput) {
-  chatModelInput.addEventListener("change", saveChatModel);
-}
-feedbackYes.addEventListener("click", () => submitFeedback("yes"));
-feedbackNo.addEventListener("click", () => submitFeedback("no"));
-clearFilesButton.addEventListener("click", () => {
+authForm?.addEventListener("submit", handleAuthSubmit);
+saveEndpointButton?.addEventListener("click", saveEndpoint);
+testEndpointButton?.addEventListener("click", testEndpoint);
+queryInput?.addEventListener("input", updateCharCount);
+chatModelInput?.addEventListener("change", saveChatModel);
+feedbackYes?.addEventListener("click", () => submitFeedback("yes"));
+feedbackNo?.addEventListener("click", () => submitFeedback("no"));
+clearFilesButton?.addEventListener("click", () => {
   selectedFiles = [];
   renderSelectedFiles();
   setUploadStatus("Список очищен. Можно выбрать файлы заново.");
 });
-startIndexingButton.addEventListener("click", startIndexing);
-refreshCollectionButton.addEventListener("click", refreshCollectionStatus);
-clearCollectionButton.addEventListener("click", handleClearCollection);
+startIndexingButton?.addEventListener("click", startIndexing);
+refreshCollectionButton?.addEventListener("click", refreshCollectionStatus);
+clearCollectionButton?.addEventListener("click", handleClearCollection);
 
 for (const button of modeButtons) {
   button.addEventListener("click", () => {
@@ -974,32 +1115,44 @@ for (const button of exampleButtons) {
   });
 }
 
-dropzone.addEventListener("click", openFilePicker);
-dropzone.addEventListener("keydown", (event) => {
+for (const button of authCloseButtons) {
+  button.addEventListener("click", closeAuthModal);
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && authModal && !authModal.hidden) {
+    closeAuthModal();
+  }
+});
+
+dropzone?.addEventListener("click", openFilePicker);
+dropzone?.addEventListener("keydown", (event) => {
   if (event.key === "Enter" || event.key === " ") {
     event.preventDefault();
     openFilePicker();
   }
 });
 
-dropzone.addEventListener("dragover", (event) => {
+dropzone?.addEventListener("dragover", (event) => {
   event.preventDefault();
   dropzone.classList.add("is-dragover");
 });
 
-dropzone.addEventListener("dragleave", () => {
+dropzone?.addEventListener("dragleave", () => {
   dropzone.classList.remove("is-dragover");
 });
 
-dropzone.addEventListener("drop", (event) => {
+dropzone?.addEventListener("drop", (event) => {
   event.preventDefault();
   dropzone.classList.remove("is-dragover");
   handleFiles(Array.from(event.dataTransfer?.files || []));
 });
 
-fileInput.addEventListener("change", () => {
+fileInput?.addEventListener("change", () => {
   handleFiles(Array.from(fileInput.files || []));
   fileInput.value = "";
 });
 
-refreshCollectionStatus();
+restoreSession(true).finally(() => {
+  refreshCollectionStatus();
+});

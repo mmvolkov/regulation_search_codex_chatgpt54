@@ -14,48 +14,13 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260316f" />
+    <link rel="stylesheet" href="./styles.css?v=20260316h" />
   </head>
   <body>
     <div class="page-ornament page-ornament--left" aria-hidden="true"></div>
     <div class="page-ornament page-ornament--right" aria-hidden="true"></div>
 
     <div class="app-shell">
-      <header class="topbar">
-        <div class="brand-lockup">
-          <span class="brand-lockup__mark" aria-hidden="true">
-            <span></span>
-            <span></span>
-            <span></span>
-            <span></span>
-            <span></span>
-            <span></span>
-            <span></span>
-            <span></span>
-            <span></span>
-          </span>
-          <div class="brand-lockup__text">
-            <strong>Помощник для сотрудников</strong>
-            <span>Корпоративные регламенты</span>
-          </div>
-        </div>
-
-        <nav class="topbar__nav" aria-label="Навигация">
-          <a href="#workspace">Демо</a>
-          <a href="#upload-view">Загрузка</a>
-          <a href="#settings">Подключение</a>
-        </nav>
-
-        <div class="topbar__actions">
-          <button id="check-access" class="topbar__button topbar__button--ghost" type="button">
-            Проверить доступ
-          </button>
-          <button id="save-email" class="topbar__button topbar__button--primary" type="button">
-            Сохранить e-mail
-          </button>
-        </div>
-      </header>
-
       <main id="workspace" class="workspace">
         <section class="workspace-frame">
           <div class="workspace-frame__header">
@@ -77,18 +42,14 @@
               </div>
             </div>
 
-            <label class="identity-card">
-              <span class="identity-card__label">Рабочий e-mail</span>
-              <input
-                id="user-email"
-                class="identity-card__input"
-                type="email"
-                spellcheck="false"
-                placeholder="your.name@company.ru"
-                autocomplete="email"
-              />
-              <span id="access-status" class="endpoint-status">Доступ не проверялся</span>
-            </label>
+            <section class="access-card">
+              <span class="access-card__label">Подключение</span>
+              <strong id="current-login" class="access-card__title">Не подключено</strong>
+              <button id="connect-button" class="secondary-button secondary-button--wide" type="button">
+                Подключиться
+              </button>
+              <p id="access-status" class="endpoint-status" hidden></p>
+            </section>
 
             <div class="mode-switch" aria-label="Режимы">
               <button
@@ -472,6 +433,57 @@
       </article>
     </template>
 
-    <script src="./app.js?v=20260316f"></script>
+    <div id="auth-modal" class="auth-modal" hidden>
+      <div class="auth-modal__backdrop" data-auth-close></div>
+      <div
+        class="auth-modal__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="auth-modal-title"
+      >
+        <button class="auth-modal__close" type="button" data-auth-close aria-label="Закрыть">
+          ×
+        </button>
+        <p class="eyebrow">Подключение</p>
+        <h2 id="auth-modal-title">Вход в систему</h2>
+        <p class="auth-modal__lead">
+          Введите логин и пароль. Доступ проверяется по Google-таблице
+          <strong>regulation_search_codex_chatgpt54_authorized_users</strong>.
+        </p>
+        <form id="auth-form" class="auth-form">
+          <label class="field">
+            <span>Логин</span>
+            <input
+              id="auth-login"
+              type="text"
+              spellcheck="false"
+              autocomplete="username"
+              placeholder="user01"
+            />
+          </label>
+
+          <label class="field">
+            <span>Пароль</span>
+            <input
+              id="auth-password"
+              type="password"
+              autocomplete="current-password"
+              placeholder="Введите пароль"
+            />
+          </label>
+
+          <p id="auth-modal-status" class="endpoint-status" hidden></p>
+
+          <div class="auth-form__actions">
+            <button class="secondary-button" type="button" data-auth-close>Отмена</button>
+            <button id="auth-submit" class="command-button auth-form__submit" type="submit">
+              Подключиться
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="./app.js?v=20260316h"></script>
   </body>
 </html>
