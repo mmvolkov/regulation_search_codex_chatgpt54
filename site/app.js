@@ -527,6 +527,14 @@ function renderHistory() {
   }
 }
 
+function clearResultsList(placeholderText = "Пока пусто. После поиска здесь появятся цитаты из документов и разделов.") {
+  if (!resultsNode) {
+    return;
+  }
+
+  resultsNode.innerHTML = `<div class="results-placeholder">${placeholderText}</div>`;
+}
+
 function renderResults(data) {
   if (!resultsNode || !summaryNode || !resultTemplate) {
     return;
@@ -834,6 +842,7 @@ async function handleSearch(event) {
   submitButton.disabled = true;
   resetFeedbackState();
   lastSearchContext = null;
+  clearResultsList("Ищу подтверждающие фрагменты...");
   setState("Выполняю поиск по регламентам и собираю подтверждающие фрагменты...", "loading");
   summaryNode.textContent = "Идёт поиск по документам.";
 
