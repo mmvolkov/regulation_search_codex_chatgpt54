@@ -29,6 +29,12 @@ data/
 qdrant_storage/
 documents/
 
+# Credentials
+.beget_credentials
+
+# Claude Code
+.claude/
+
 # Beget deployment artifacts
 deploy/beget/regulations/*
 !deploy/beget/regulations/.gitkeep
